@@ -51,7 +51,7 @@ plt.loglog( x, y, 'ko' )
 plt.loglog( x_fit, y_fit, 'r', linewidth = '2', 
             label = '$N \\propto \\mathrm{degree}^{-2.2}$' )
 plt.loglog( x_fit, y_exp, 'b', linewidth = '2', 
-            label = '$N \\propto e^{-\\mathrm{degree}}$' )
+            label = '$N \\propto e^{-\\mathrm{degree}/k}$' )
 plt.ylim( [ 1, 1e8 ] )
 
 ax = plt.gca()
