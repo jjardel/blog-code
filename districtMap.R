@@ -1,10 +1,17 @@
+# R script to take the district coordinates and make a pretty map out of them.
+# Uses ggmap to query the Google Maps API and overplot the district boundaries.
+
 library(ggmap)
 library(ggplot2)
 library(scales)
+library( stringr )
 
 args <- commandArgs( TRUE )
 
 filename = args[ 1 ]
+districtName = str_replace( filename, "_coords.csv", '' )
+districtName = str_replace( districtName, "R/", '' )
+
 
 district.data <- read.csv( filename )
 
@@ -29,7 +36,7 @@ district.map <- get_map( location =
                         c( x1 - deltaX, y1 - deltaY, x2 + deltaX, y2 + deltaY),
                         maptype="hybrid", source="google")
 
-map = ggmap( district.map )
+map = ggmap( district.map ) + xlab("") + ylab("") + ggtitle( paste( "Congressional District", districtName ) )
 iStart = 1
 
 # loop through the number of segments to draw the boundaries properly
