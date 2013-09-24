@@ -7,7 +7,7 @@ import sys
 def two_party( returns ):
     # pick out the top 2 candidates receiving votes.  Should be Republican
     # and Democrat in almost every race.
-    # Output margin of victory.
+    # Output vote percentage received by each major party
     returns.sort( key = lambda percentage: percentage[ 1 ], reverse = True )
     top2 = returns[ :2 ]
     R = 1
