@@ -20,7 +20,7 @@ def two_party( returns ):
             dem = str( party[ 1 ] )
             D -= 1
     if R != 0 or D != 0:
-        # if a third party wins more votes, output zero margin of victory
+        # if a third party wins more votes, output zeros for each major party
         repub = '0'
         dem = '0'
     sParty = repub + ',' + dem
