@@ -10,12 +10,19 @@ from sklearn.ensemble import RandomForestRegressor
 # before and after every lake travis observation
 
 class Basin:
+    """
+    Make a model of a river basin from historical data.  The historical data
+    in this case are rainfall rates, which then predict stream flow rates,
+    which then predict the elevation of a lake in the basin.  Use the
+    modelHistorical() method to make this model.
+    """
     def __init__( self, **kwargs ):
         self.dates = pd.date_range( kwargs[ 'startDate' ], kwargs[ 'endDate' ] )
         self.readData( **kwargs )
         #self.model( **kwargs )
 
     def readData( self, **kwargs ):
+        # read in all the historical training data
 
         self.readWeather( **kwargs )
         self.readHydro( **kwargs )
@@ -35,6 +42,7 @@ class Basin:
         return out
 
     def readStationNames( self, **kwargs ):
+        # figure out station names from their ID numbers
 
         stations = {}
         with open( kwargs[ 'stationNamesFile' ] ) as fp:
@@ -49,6 +57,7 @@ class Basin:
                    
 
     def readWeather( self, **kwargs ):
+        # read in the rainfall data
 
         stationNames = set()
         # read through the file once to get all the station names
@@ -79,6 +88,7 @@ class Basin:
         self.weather = df
         
     def readHydro( self, **kwargs ):
+        # read in all the stream flow data
         
         stationNames = []
         stationFile = open( kwargs[ 'stationFile' ] )
