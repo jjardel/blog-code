@@ -55,9 +55,9 @@ geom_point( aes( x = long, y = lat ), data = stations ) +
   geom_text( aes( x =-97.597904, y = 31.702574, label = 'Lake Travis' ),
             size = 5, fontface = 'bold' )
 
-ggsave( 'important_stations.png' )
+ggsave( 'important_stations_map.png' )
 print( map )
 
 
 
-#lines.2 <- spTransform(lines, CRS("+proj=longlat +datum=WGS84"))
+
