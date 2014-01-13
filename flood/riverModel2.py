@@ -62,7 +62,7 @@ class Basin:
         if test:
             filepath = kwargs[ 'testWeatherFile' ]
         else:
-            filespath = kwargs[ 'weatherFile' ]
+            filepath = kwargs[ 'weatherFile' ]
         
         stationNames = set()
         # read through the file once to get all the station names
@@ -295,7 +295,6 @@ class Basin:
         plt.ylabel( 'Station Importance' )
         plt.savefig( 'important_stations.png' )
 
-        import pdb; pdb.set_trace()
 
     def predict( self, **kwargs ):
         self.modelHistorical( **kwargs )
@@ -320,8 +319,9 @@ class Basin:
 def main( **kwargs ):
 
     colorado = Basin( **kwargs )
-    colorado.modelHistorical( **kwargs )
-    colorado.findImportantStations( colorado.lakeModel, 10, **kwargs )
+    colorado.predict( **kwargs )
+    #colorado.modelHistorical( **kwargs )
+    #colorado.findImportantStations( colorado.lakeModel, 10, **kwargs )
     import pdb; pdb.set_trace()
 
     
