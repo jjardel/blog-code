@@ -177,11 +177,10 @@ class Basin:
         return station, delay
 
 
-    def setDelay( self, A, **kwargs ):
+    def setDelay( self, A, nDays ):
         # reformat training data to include station observations up to
         # nDays in the past
         
-        nDays = kwargs[ 'nDays' ]
         X = np.zeros( ( A.shape[ 0 ],
                         ( nDays + 1 ) * A.shape[ 1 ] ) )
         
@@ -205,7 +204,7 @@ class Basin:
     def fitFlowRates( self, rainData, flowData, **kwargs ):
         # model stream flows from rainfall rates
 
-        xTrain = self.setDelay( rainData, **kwargs )
+        xTrain = self.setDelay( rainData, kwargs[ 'nDays' ] )
         yTrain = flowData
 
         model = RandomForestRegressor( n_estimators = 50, n_jobs = 4,
@@ -217,7 +216,7 @@ class Basin:
     def fitLakeLevels( self, flowData, lakeData, **kwargs ):
         # model lake levels from stream flows
         
-        xTrain = self.setDelay( flowData, **kwargs )
+        xTrain = self.setDelay( flowData, kwargs[ 'nDays' ] )
         yTrain = self.lake.values[ :, 0 ]
         model = RandomForestRegressor( n_estimators = 50, n_jobs = 4,
                                        random_state = 42, oob_score = True )
@@ -334,20 +333,23 @@ class Basin:
         for key in remaining:
             entry = []
             for day in range( zTest.shape[ 0 ] ):
-                entry.append( griddata( xyTest, zTest[ day, : ],
-                                        [ self.weatherLocs[ key ] ] ) )
+                entry += griddata( xyTest, zTest[ day, : ],
+                                   [ self.weatherLocs[ key ] ] ).tolist() 
             df[ key ] = entry
 
         df.fillna( method = 'pad', inplace = True )
         df.fillna( method = 'bfill', inplace = True )
+        df.fillna( value = 0., inplace = True )
+
         self.testWeather = df # overwrite previous with interpolated
 
     def predFlowRates( self, **kwargs ):
 
         print 'predicting new flow rates'
         
+        nDays = kwargs[ 'nDays']
         model = self.flowModel
-        xTest = self.testWeather.values
+        xTest = self.setDelay( self.testWeather.values, nDays )
         yTest = model.predict( xTest )
         self.testFlows = yTest
 
@@ -355,8 +357,9 @@ class Basin:
 
         print 'predicting new lake levels'
 
+        nDays = kwargs[ 'nDays' ]
         model = self.lakeModel
-        xTest = self.testFlows
+        xTest = self.setDelay( self.testFlows, nDays )
         yTest = model.predict( xTest )
 
         import pdb; pdb.set_trace()
