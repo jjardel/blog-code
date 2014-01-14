@@ -7,6 +7,7 @@ from sklearn import metrics
 from sklearn.ensemble import RandomForestRegressor
 from scipy.interpolate import griddata
 from mpl_toolkits.mplot3d import Axes3D
+from sklearn.linear_model import RidgeCV
 
 
 # training data are all hydromet sites + rainfall totals for all site for 10 days
@@ -207,8 +208,10 @@ class Basin:
         xTrain = self.setDelay( rainData, kwargs[ 'nDays' ] )
         yTrain = flowData
 
-        model = RandomForestRegressor( n_estimators = 50, n_jobs = 4,
-                                       random_state = 42, oob_score = True )
+        #model = RandomForestRegressor( n_estimators = 50, n_jobs = 4,
+        #                               random_state = 42, oob_score = True )
+
+        model = RidgeCV( alphas = np.logspace( -2., 2. ) )
         model.fit( xTrain, yTrain )
 
         self.flowModel = model
@@ -218,8 +221,9 @@ class Basin:
         
         xTrain = self.setDelay( flowData, kwargs[ 'nDays' ] )
         yTrain = self.lake.values[ :, 0 ]
-        model = RandomForestRegressor( n_estimators = 50, n_jobs = 4,
-                                       random_state = 42, oob_score = True )
+        #model = RandomForestRegressor( n_estimators = 50, n_jobs = 4,
+        #                               random_state = 42, oob_score = True )
+        model = RidgeCV( alphas = np.logspace( -2., 2. ) )
         
         model.fit( xTrain, yTrain )
 
@@ -341,6 +345,8 @@ class Basin:
         df.fillna( method = 'bfill', inplace = True )
         df.fillna( value = 0., inplace = True )
 
+        df.iloc[ -20:-15, : ] = 1000.
+
         self.testWeather = df # overwrite previous with interpolated
 
     def predFlowRates( self, **kwargs ):
@@ -349,7 +355,12 @@ class Basin:
         
         nDays = kwargs[ 'nDays']
         model = self.flowModel
-        xTest = self.setDelay( self.testWeather.values, nDays )
+
+        testing = self.weather.values
+        testing[ -6:-3, : ] = 1000.
+        xTest = self.setDelay( testing, nDays )
+        
+        #xTest = self.setDelay( self.testWeather.values, nDays )
         yTest = model.predict( xTest )
         self.testFlows = yTest
 
@@ -391,10 +402,10 @@ if __name__ == '__main__':
                'stationNamesFile': '/Users/jardel/blog/drought/stations.latlon',
                'startDate': '2011-01-01',
                'endDate': '2012-12-31',
-               'nDays': 5,
+               'nDays': 2,
                'maxFill': 5,
-               'testWeatherFile': '/Users/jardel/blog/drought/noaa.weather.test',
-               'testStartDate': '1991-12-18',
-               'testEndDate': '1991-12-23'
+               'testWeatherFile': '/Users/jardel/blog/drought/noaa.weather.raw',
+               'testStartDate': '2011-01-01',
+               'testEndDate': '2012-12-31'
                }
     main( **kwargs )
