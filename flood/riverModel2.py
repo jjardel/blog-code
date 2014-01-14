@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 import shapefile as sf
 from sklearn import metrics
 from sklearn.ensemble import RandomForestRegressor
+from scipy.interpolate import griddata
+from mpl_toolkits.mplot3d import Axes3D
+
 
 # training data are all hydromet sites + rainfall totals for all site for 10 days
 # before and after every lake travis observation
@@ -73,11 +76,11 @@ class Basin:
                 name = row[ 0 ][ 6: ]
                 stationNames.add( name )
 
+
         df = pd.DataFrame( np.nan, index = dates, columns = stationNames )
-                           
         stations = {}
         
-        with open( kwargs[ 'weatherFile' ] ) as fp:
+        with open( filepath ) as fp:
             reader = csv.reader( fp )
             reader.next() # skip header
             for row in reader:
@@ -301,15 +304,64 @@ class Basin:
 
         self.testDates = pd.date_range( kwargs[ 'testStartDate' ],
                                         kwargs[ 'testEndDate' ] )
+
         self.readWeather( self.testDates, test = True, **kwargs )
-        import pdb; pdb.set_trace()
         self.interpolateTestWeather( **kwargs )
 
         # use fitted model to predict new flows and lake levels
         self.predFlowRates( **kwargs ) 
         self.predLakeLevels( **kwargs )
 
-                
+    def interpolateTestWeather( self, **kwargs ):
+
+        df = pd.DataFrame( np.nan, index = self.testDates,
+                           columns = self.weather.columns )
+
+        # take intersection
+        common = self.weather.columns & self.testWeather.columns
+        # if actual station exists in 1991 set, use its data
+        df[ common ] = self.testWeather[ common ] 
+
+        # remaining stations need to be interpolated
+        remaining = self.weather.columns - common
+
+        xyTest = self.testWeatherLocs.values()
+        xyTrain = self.weatherLocs.values()
+
+        # funny indexing to keep in same order as dict
+        zTest = self.testWeather[ self.testWeatherLocs.keys() ].values
+
+        for key in remaining:
+            entry = []
+            for day in range( zTest.shape[ 0 ] ):
+                entry.append( griddata( xyTest, zTest[ day, : ],
+                                        [ self.weatherLocs[ key ] ] ) )
+            df[ key ] = entry
+
+        df.fillna( method = 'pad', inplace = True )
+        df.fillna( method = 'bfill', inplace = True )
+        self.testWeather = df # overwrite previous with interpolated
+
+    def predFlowRates( self, **kwargs ):
+
+        print 'predicting new flow rates'
+        
+        model = self.flowModel
+        xTest = self.testWeather.values
+        yTest = model.predict( xTest )
+        self.testFlows = yTest
+
+    def predLakeLevels( self, **kwargs ):
+
+        print 'predicting new lake levels'
+
+        model = self.lakeModel
+        xTest = self.testFlows
+        yTest = model.predict( xTest )
+
+        import pdb; pdb.set_trace()
+
+        
         
 
     
