@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import shapefile as sf
 from sklearn import metrics
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import ExtraTreesRegressor
 from scipy.interpolate import griddata
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.linear_model import RidgeCV
@@ -88,17 +89,19 @@ class Basin:
                 name = row[ 0 ][ 6: ]
                 date = row[ 5 ]
                 rain = row[ 6 ]
-                df.loc[ date, name ] = rain # pandas is cool
+                if date in dates:
+                    df.loc[ date, name ] = rain # pandas is cool
 
                 if name not in stations.keys():
                     try:
                         stations[ name ] = [ float( row[ 3 ] ),
                                              float( row[ 4 ] ) ]
                     except ValueError:
-                        stations[ name ] = [ np.nan, np.nan ]
+                        stations[ name ] = [ 0., 0. ]
 
         # fill missing values
         df.fillna( df.mean(), inplace = True ) # fill with station means
+        df.fillna( value = 0., inplace = True ) # clobber remaining with zeros
 
         # maybe get fancier and also encode the locations of the stations
         # and have scipy interpolate spatially (rather than temporally)
@@ -110,7 +113,6 @@ class Basin:
             self.weather = df
             self.weatherLocs = stations
 
-        
     def readHydro( self, **kwargs ):
         # read in all the stream flow data
         
@@ -198,6 +200,7 @@ class Basin:
         
         print 'converting rainfall to flow rates'
         self.fitFlowRates( self.weather.values, self.hydro.values, **kwargs )
+
         print 'converting flow rates to lake levels'
         self.fitLakeLevels( self.hydro.values, self.lake.values[ :, 0 ],
                             **kwargs )
@@ -208,10 +211,10 @@ class Basin:
         xTrain = self.setDelay( rainData, kwargs[ 'nDays' ] )
         yTrain = flowData
 
-        #model = RandomForestRegressor( n_estimators = 50, n_jobs = 4,
-        #                               random_state = 42, oob_score = True )
+        model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
+                                     random_state = 42 )#, oob_score = True )
 
-        model = RidgeCV( alphas = np.logspace( -2., 2. ) )
+        #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
         model.fit( xTrain, yTrain )
 
         self.flowModel = model
@@ -220,10 +223,11 @@ class Basin:
         # model lake levels from stream flows
         
         xTrain = self.setDelay( flowData, kwargs[ 'nDays' ] )
-        yTrain = self.lake.values[ :, 0 ]
-        #model = RandomForestRegressor( n_estimators = 50, n_jobs = 4,
-        #                               random_state = 42, oob_score = True )
-        model = RidgeCV( alphas = np.logspace( -2., 2. ) )
+        xTrain = np.column_stack( ( xTrain, np.roll( lakeData, 1 ) ) )
+        yTrain = lakeData
+        model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
+                                     random_state = 42 )#, oob_score = True )
+        #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
         
         model.fit( xTrain, yTrain )
 
@@ -309,11 +313,61 @@ class Basin:
                                         kwargs[ 'testEndDate' ] )
 
         self.readWeather( self.testDates, test = True, **kwargs )
-        self.interpolateTestWeather( **kwargs )
+        self.flood( **kwargs )
+
+        #self.interpolateTestWeather( **kwargs )
 
         # use fitted model to predict new flows and lake levels
-        self.predFlowRates( **kwargs ) 
-        self.predLakeLevels( **kwargs )
+        self.predictForward( **kwargs )
+
+    def gaussian( self, xx, height, sigma ):
+
+        # 2D gaussian centered on lake travis
+        
+        f = height * np.exp( -1. * ( xx**2 / ( 2. * sigma )**2 ) )
+        return f
+
+
+    def latlonToMiles( self, loc1, loc2 ):
+        
+        # loc is [ lat, lon ]
+        
+        dLon = np.radians( loc1[ 1 ] - loc2[ 1 ] )
+        dLat = np.radians( loc1[ 0 ] - loc2[ 0 ] )
+
+        a = ( np.sin( dLat / 2. ) )**2 + np.cos( np.radians( loc1[ 0 ] ) ) * np.cos( np.radians( loc2[ 0 ] ) ) * ( np.sin( dLon / 2. ) )**2
+        
+        c = 2. * np.arctan2( np.sqrt( a ), np.sqrt( 1 - a ) )
+        miles = 3961. * c # 3961 is radius of Earth in miles
+
+        return miles
+
+    def flood( self, **kwargs ):
+        
+
+        # define a function to distribute rainfall based on distance from
+        # center of the storm.  Using a gaussian for now..
+
+        center = [ 30.438758,-97.931812 ] # latlon
+        dispersion = 70. # miles
+
+        # FWHM = 2.35 * dispersion
+        height = 3048. # tenths of mm ( = 1 foot ) max rainfall
+
+        # then call latlonToMiles on each station to determine
+        # that station's distance from the epicenter
+
+        weather = self.testWeather
+        date = kwargs[ 'floodDate' ]
+
+        keys = self.weather.columns
+        stations = self.weatherLocs
+        for key in keys:
+            dist = self.latlonToMiles( center, stations[ key ] )
+            rain = self.gaussian( dist, height, dispersion )
+            weather.loc[ date, key ] = rain
+        
+        self.testWeather = weather
 
     def interpolateTestWeather( self, **kwargs ):
 
@@ -349,6 +403,61 @@ class Basin:
 
         self.testWeather = df # overwrite previous with interpolated
 
+    def predictForward( self, **kwargs ):
+
+        # new idea:
+        # have stream flows predict delta lake height.  Track
+        # lake levels from these deltas
+        
+        lakeLevels = []
+
+        nDays = kwargs[ 'nDays' ]
+        allTestWeather = self.setDelay( self.testWeather.values, nDays )
+        startingWeather = allTestWeather[ :nDays + 1, : ]
+
+        startingFlows = self.predFlowRates( startingWeather )
+        startingFlows = self.setDelay( startingFlows, nDays )
+        startingFlows = np.column_stack( ( startingFlows,
+                                           self.lake.loc[ self.testDates ].values[ :nDays + 1, : ] ) )
+        
+        startingLakes = self.predLakeLevels( startingFlows ).tolist()
+        lakeLevels += startingLakes[ :-1 ]
+        
+        lake = startingLakes[ -1 ]
+        
+        for iDate in range( nDays + 1, len( self.testDates ) ):
+            lakeLevels.append( lake )
+            #weather =  self.testWeather.loc[ date ].values
+            weather = self.setDelay( self.testWeather.values, nDays )[ iDate, : ]
+            
+            predflows = self.predFlowRates( weather )[ 0 ]
+            #flows = self.setDelay( predflows, nDays )
+
+            flows = predflows
+
+            # kluge to re-copy the flows nDays times
+            for i in range( nDays ):
+                flows = np.hstack( ( flows, predflows ) )
+
+            # is the delay really being set in flows?
+
+            flows = np.hstack( ( flows, lake ) )
+            lake = self.predLakeLevels( flows ).tolist()[ 0 ]
+
+        import pdb; pdb.set_trace()
+
+
+    def predFlowRates( self, inpWeather ):
+
+        model = self.flowModel
+        return model.predict( inpWeather )
+
+    def predLakeLevels( self, inpFlows ):
+        model = self.lakeModel
+        return model.predict( inpFlows )
+
+    # DEPRECATED
+    """
     def predFlowRates( self, **kwargs ):
 
         print 'predicting new flow rates'
@@ -356,12 +465,9 @@ class Basin:
         nDays = kwargs[ 'nDays']
         model = self.flowModel
 
-        testing = self.weather.values
-        testing[ -6:-3, : ] = 1000.
-        xTest = self.setDelay( testing, nDays )
-        
-        #xTest = self.setDelay( self.testWeather.values, nDays )
+        xTest = self.setDelay( self.testWeather.values, nDays )
         yTest = model.predict( xTest )
+
         self.testFlows = yTest
 
     def predLakeLevels( self, **kwargs ):
@@ -371,11 +477,16 @@ class Basin:
         nDays = kwargs[ 'nDays' ]
         model = self.lakeModel
         xTest = self.setDelay( self.testFlows, nDays )
+
+        # historical lake levels
+        historical = self.lake.loc[ self.testDates ].values
+
+        xTest = np.column_stack( ( xTest, np.roll( historical, 1 ) ) )
         yTest = model.predict( xTest )
 
         import pdb; pdb.set_trace()
 
-        
+    """ 
         
 
     
@@ -384,10 +495,13 @@ class Basin:
 
 def main( **kwargs ):
 
+
     colorado = Basin( **kwargs )
     colorado.predict( **kwargs )
     #colorado.modelHistorical( **kwargs )
     #colorado.findImportantStations( colorado.lakeModel, 10, **kwargs )
+
+
     import pdb; pdb.set_trace()
 
     
@@ -405,7 +519,8 @@ if __name__ == '__main__':
                'nDays': 2,
                'maxFill': 5,
                'testWeatherFile': '/Users/jardel/blog/drought/noaa.weather.raw',
-               'testStartDate': '2011-01-01',
-               'testEndDate': '2012-12-31'
+               'testStartDate': '2012-12-01',
+               'testEndDate': '2012-12-31',
+               'floodDate': '2012-12-25'
                }
     main( **kwargs )
