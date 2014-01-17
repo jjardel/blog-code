@@ -29,6 +29,7 @@ class Basin:
     def readData( self, **kwargs ):
         # read in all the historical training data
 
+        print 'reading training data'
         self.readWeather( self.dates, test = False, **kwargs )
         self.readHydro( **kwargs )
         self.readLake( **kwargs )
@@ -78,6 +79,8 @@ class Basin:
                 name = row[ 0 ][ 6: ]
                 stationNames.add( name )
 
+        if test:
+            stationNames = self.weather.columns
 
         df = pd.DataFrame( np.nan, index = dates, columns = stationNames )
         stations = {}
@@ -90,7 +93,9 @@ class Basin:
                 date = row[ 5 ]
                 rain = row[ 6 ]
                 if date in dates:
-                    df.loc[ date, name ] = rain # pandas is cool
+                    if not test or ( test and name in stationNames ):
+                        df.loc[ date, name ] = rain # pandas is cool
+                    
 
                 if name not in stations.keys():
                     try:
@@ -100,9 +105,32 @@ class Basin:
                         stations[ name ] = [ 0., 0. ]
 
         # fill missing values
+
+
+        threshold = kwargs[ 'completenessThreshold' ]
+        nExamples = df.shape[ 0 ]
+        nGood = df.count()
+        completeness = nGood / float( nExamples )
+
+        # drop stations with too many missing values
+        if not test:
+            dropList = completeness[ completeness < threshold ].index.tolist()
+            df = df.drop( dropList, axis = 1  )
+
+        
+
+        # fill forward up to a limit
+        df.fillna( method = 'pad', limit = kwargs[ 'maxFill' ], inplace = True )
+
+        # clobber the rest with zeros
+        df.fillna( value = 0., inplace = True )
+
+        
+        """
         df.fillna( df.mean(), inplace = True ) # fill with station means
         df.fillna( value = 0., inplace = True ) # clobber remaining with zeros
-
+        """
+                        
         # maybe get fancier and also encode the locations of the stations
         # and have scipy interpolate spatially (rather than temporally)
 
@@ -112,6 +140,8 @@ class Basin:
         else:
             self.weather = df
             self.weatherLocs = stations
+
+            print 'done weather data'
 
     def readHydro( self, **kwargs ):
         # read in all the stream flow data
@@ -135,6 +165,18 @@ class Basin:
                 flow = line.split()[ 1 ]
                 df.loc[ date, stationID ] = flow
 
+        # fill missing data
+                
+        threshold = kwargs[ 'completenessThreshold' ]
+        nExamples = df.shape[ 0 ]
+        nGood = df.count()
+        completeness = nGood / float( nExamples )
+
+        # drop stations with too many missing values
+        dropList = completeness[ completeness < threshold ].index.tolist()
+        df = df.drop( dropList, axis = 1 )
+        
+
         # fill missing data first with previous days value
         # up to maximum of maxFill
 
@@ -142,6 +184,8 @@ class Basin:
         df.fillna( df.mean(), inplace = True ) # fill remainder with station avg
 
         self.hydro = df.dropna( axis = 1 ) # drop stations with all nan
+
+        print 'done hydro data'
 
     def readLake( self, **kwargs ):
         
@@ -212,7 +256,8 @@ class Basin:
         yTrain = flowData
 
         model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
-                                     random_state = 42 )#, oob_score = True )
+                                     random_state = 42, max_features = 'sqrt' )
+            
 
         #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
         model.fit( xTrain, yTrain )
@@ -223,8 +268,11 @@ class Basin:
         # model lake levels from stream flows
         
         xTrain = self.setDelay( flowData, kwargs[ 'nDays' ] )
-        xTrain = np.column_stack( ( xTrain, np.roll( lakeData, 1 ) ) )
-        yTrain = lakeData
+
+        # fit to daily changes in elevation
+        yTrain = lakeData - np.roll( lakeData, 1 )
+        yTrain[ 0 ] = 0.
+        
         model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
                                      random_state = 42 )#, oob_score = True )
         #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
@@ -235,9 +283,11 @@ class Basin:
         
         ypreds = model.predict( xTrain )
 
+        lakePreds = lakeData[ 0 ] + np.cumsum( ypreds )
+
         plt.clf()
-        plt.plot( self.dates, yTrain, label = 'Actual' )
-        plt.plot( self.dates, ypreds, label = 'Predicted' )
+        plt.plot( self.dates, yTrain + lakeData, label = 'Actual' )
+        plt.plot( self.dates, lakePreds, label = 'Predicted' )
 
         plt.xlabel( 'Date' )
         plt.ylabel( 'Lake Travis Elevation (ft)' )
@@ -358,14 +408,16 @@ class Basin:
         # that station's distance from the epicenter
 
         weather = self.testWeather
-        date = kwargs[ 'floodDate' ]
+        dates = pd.date_range( start = kwargs[ 'floodStartDate' ],
+                               end = kwargs[ 'floodEndDate' ] )
 
         keys = self.weather.columns
-        stations = self.weatherLocs
-        for key in keys:
-            dist = self.latlonToMiles( center, stations[ key ] )
-            rain = self.gaussian( dist, height, dispersion )
-            weather.loc[ date, key ] = rain
+        stations = self.weatherLocs        
+        for date in dates:
+            for key in keys:
+                dist = self.latlonToMiles( center, stations[ key ] )
+                rain = self.gaussian( dist, height, dispersion )
+                weather.loc[ date, key ] = rain
         
         self.testWeather = weather
 
@@ -408,17 +460,32 @@ class Basin:
         # new idea:
         # have stream flows predict delta lake height.  Track
         # lake levels from these deltas
-        
-        lakeLevels = []
 
         nDays = kwargs[ 'nDays' ]
+        xTest1 = self.setDelay( self.testWeather.values, nDays )
+        flows = self.predFlowRates( xTest1 ) # these are almost identical!!!
+
+        xTest2 = self.setDelay( flows, nDays )
+        lakeChanges = self.predLakeLevels( xTest2 )
+
+        lakeStart = self.lake.loc[ self.testDates[ 0 ] ].values
+        lakePreds = lakeStart + np.cumsum( lakeChanges )
+
+        import pdb; pdb.set_trace()
+        
+        
+        
+        
+
+        """
+        lakeLevels = []
+
+
         allTestWeather = self.setDelay( self.testWeather.values, nDays )
         startingWeather = allTestWeather[ :nDays + 1, : ]
 
         startingFlows = self.predFlowRates( startingWeather )
         startingFlows = self.setDelay( startingFlows, nDays )
-        startingFlows = np.column_stack( ( startingFlows,
-                                           self.lake.loc[ self.testDates ].values[ :nDays + 1, : ] ) )
         
         startingLakes = self.predLakeLevels( startingFlows ).tolist()
         lakeLevels += startingLakes[ :-1 ]
@@ -445,7 +512,7 @@ class Basin:
             lake = self.predLakeLevels( flows ).tolist()[ 0 ]
 
         import pdb; pdb.set_trace()
-
+        """
 
     def predFlowRates( self, inpWeather ):
 
@@ -518,9 +585,11 @@ if __name__ == '__main__':
                'endDate': '2012-12-31',
                'nDays': 2,
                'maxFill': 5,
+               'completenessThreshold': .5,
                'testWeatherFile': '/Users/jardel/blog/drought/noaa.weather.raw',
                'testStartDate': '2012-12-01',
                'testEndDate': '2012-12-31',
-               'floodDate': '2012-12-25'
+               'floodStartDate': '2012-12-24',
+               'floodEndDate': '2012-12-26'
                }
     main( **kwargs )
