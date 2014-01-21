@@ -393,8 +393,31 @@ class Basin:
 
         self.readWeather( self.testDates, test = True, **kwargs )
         self.flood( **kwargs )
+        
         # use fitted model to predict new flows and lake levels
-        self.predictForward( **kwargs )
+
+        lakeLevels1 = self.predictForward( fudge = False, **kwargs )
+        lakeLevels2 = self.predictForward( fudge = True, **kwargs )
+
+        dates = self.testDates
+        lakeActual = self.lake.loc[ dates ].values
+
+        plt.clf()
+        
+        plt.plot( dates, lakeActual, 'b', label = 'Historical' )
+        plt.plot( dates, lakeLevels1, 'r', label = 'Simulated Flood' )
+        plt.plot( dates, lakeLevels2, 'g', label = 'Simulated Flood (Fudged)' )
+        plt.ylabel( 'Lake Travis Elevation (ft)' )
+        plt.xlabel( 'Date' )
+        plt.legend( loc = 2 )
+
+        fig = plt.gcf()
+        fig.autofmt_xdate()
+        
+        
+        plt.savefig( 'flood.png' )
+        
+
 
     def gaussian( self, xx, height, sigma ):
 
@@ -452,20 +475,32 @@ class Basin:
         latSpacing = np.linspace( center[ 0 ] - 1., center[ 0 ] + 1, num = 1000 )
         lonSpacing = np.linspace( center[ 1 ] - 1., center[ 1 ] + 1, num = 1000 )
 
-        latlonGrid = np.meshgrid( latSpacing, lonSpacing )
-        getDists = np.vectorize( self.latlonToMiles )
-        dists = getDists( center, latlonGrid )
+        grid = np.meshgrid( latSpacing, lonSpacing )
+        latlonGrid = zip( *[ x.flat for x in grid ] )
 
-        getRain = np.vectorize( self.gaussian )
-        rain = getRain( dists, height, dispersion )
+        dists = []
+        for coord in latlonGrid:
+            dists.append( self.latlonToMiles( center, coord ) )
+
+        # couldn't get it to vectorize properly, so I gave up
+
+        #getDists = np.vectorize( self.latlonToMiles )
+        #dists = getDists( center, latlonGrid )
+
+        #getRain = np.vectorize( self.gaussian )
+        #rain = getRain( dists, height, dispersion )
+
+        rain = []
+        for dist in dists:
+            rain.append( self.gaussian( dist, height, dispersion ) )
 
         fp = open( 'rainfall.out', 'w' )
         for i, j in zip( latlonGrid, rain ):
-            out = str( i[ 0 ] ) + ' ' + str( i[ 1 ] ) + ' ' + str( j ) + '\n'
+            out = str( i[ 0 ] ) + ',' + str( i[ 1 ] ) + ',' + str( j ) + '\n'
             fp.write( out )
 
         fp.close()
-            
+        
         self.testWeather = weather
 
     def interpolateTestWeather( self, **kwargs ):
@@ -503,7 +538,7 @@ class Basin:
 
         self.testWeather = df # overwrite previous with interpolated
 
-    def predictForward( self, **kwargs ):
+    def predictForward( self, fudge = False, **kwargs ):
 
         # have stream flows predict delta lake height.  Track
         # lake levels from these deltas
@@ -517,7 +552,7 @@ class Basin:
         floodDate = 23 # HARD CODED!!!
 
         flows = self.predFlowRates( xTest1 )
-        if kwargs[ 'fudge' ]:
+        if fudge:
             stations = self.hydro.columns
             fudgeFile = open( kwargs[ 'fudgeFile' ] )
             for line in fudgeFile:
@@ -536,26 +571,8 @@ class Basin:
         lakeStart = self.lake.loc[ self.testDates[ 0 ] ].values
         lakePreds = lakeStart + np.cumsum( lakeChanges )
 
-        dates = self.testDates
-        lakeActual = self.lake.loc[ dates ].values
+        return lakePreds
 
-        plt.clf()
-        
-        plt.plot( dates, lakeActual, 'b', label = 'Historical' )
-        plt.plot( dates, lakePreds, 'r', label = 'Simulated Flood' )
-        plt.ylabel( 'Lake Travis Elevation (ft)' )
-        plt.xlabel( 'Date' )
-        plt.legend()
-
-        fig = plt.gcf()
-        fig.autofmt_xdate()
-        
-        
-        plt.savefig( 'flood.png' )
-        
-
-
-        import pdb; pdb.set_trace()
 
     def predFlowRates( self, inpWeather ):
 
@@ -600,7 +617,6 @@ if __name__ == '__main__':
                'testEndDate': '2012-12-31',
                'floodStartDate': '2012-12-24',
                'floodEndDate': '2012-12-24',
-               'fudge': True,
                'fudgeFile': '/Users/jardel/blog/drought/historical_flows.dat'
                }
     main( **kwargs )
