@@ -12,8 +12,20 @@ from sklearn.linear_model import RidgeCV
 from sklearn import preprocessing
 
 
-# Big rainfall rates are not getting converted properly into big stream flows
-# I need to find some data of a flood or a wet year (maybe 2007?) to train on.
+def penalizedScorer( estimator, x, y ):
+    preds = estimator.predict( x )
+    mse = metrics.mean_squared_error( y, preds )
+
+    negative = np.where( preds < 0. )[ 0 ]
+    C = 1000.
+    penalty = C * np.abs( preds[ negative ] ).sum() 
+
+    score = -1. * mse + penalty
+    print penalty
+    import pdb; pdb.set_trace()
+    return score
+
+
 
 
 # training data are all hydromet sites + rainfall totals for all site for 10 days
@@ -260,22 +272,19 @@ class Basin:
         xTrain = self.setDelay( rainData, kwargs[ 'nDays' ] )
         yTrain = flowData
 
-        #weatherPCA = PCA( n_components = 50, whiten = True )
-        #xTrain = weatherPCA.fit_transform( xTrain )
-
         weatherScaler = preprocessing.StandardScaler().fit( xTrain )
         xTrain = weatherScaler.transform( xTrain )
         self.weatherScaler = weatherScaler
 
-        model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
-                                     random_state = 42 )
+        if kwargs[ 'simpleModel' ]:
+            model = RidgeCV( alphas = np.logspace( -2., 2. ) )
+        else:
+            model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
+                                         random_state = 42 )
             
-
-        #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
         model.fit( xTrain, yTrain )
 
         self.flowModel = model
-        #self.weatherPCA = weatherPCA
 
     def fitLakeLevels( self, flowData, lakeData, **kwargs ):
         # model lake levels from stream flows
@@ -290,15 +299,18 @@ class Basin:
         yTrain = lakeData - np.roll( lakeData, 1 )
         yTrain[ 0 ] = 0.
 
+
+        if kwargs[ 'simpleModel' ]:
+            model = RidgeCV( alphas = np.logspace( -2., 2. ) )
+        else:
+            model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
+                                         random_state = 42 )
         
-        model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
-                                     random_state = 42 )
-        
-        #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
+
         model.fit( xTrain, yTrain )
 
         self.lakeModel = model
-        #self.flowPCA = flowPCA
+
         ypreds = model.predict( xTrain )
         lakePreds = lakeData[ 0 ] + np.cumsum( ypreds )
 
@@ -381,9 +393,6 @@ class Basin:
 
         self.readWeather( self.testDates, test = True, **kwargs )
         self.flood( **kwargs )
-
-        #self.interpolateTestWeather( **kwargs )
-
         # use fitted model to predict new flows and lake levels
         self.predictForward( **kwargs )
 
@@ -440,7 +449,6 @@ class Basin:
                 weather.loc[ date, key ] = rain
 
         # write out grid of lat/lon vs rainfall for plotting in R
-        """
         latSpacing = np.linspace( center[ 0 ] - 1., center[ 0 ] + 1, num = 1000 )
         lonSpacing = np.linspace( center[ 1 ] - 1., center[ 1 ] + 1, num = 1000 )
 
@@ -457,14 +465,7 @@ class Basin:
             fp.write( out )
 
         fp.close()
-        """    
             
-            
-        
-        
-        
-        
-                
         self.testWeather = weather
 
     def interpolateTestWeather( self, **kwargs ):
@@ -507,11 +508,26 @@ class Basin:
         # have stream flows predict delta lake height.  Track
         # lake levels from these deltas
 
+        print 'predicting new lake levels from flood'
+
         nDays = kwargs[ 'nDays' ]
         xTest1 = self.setDelay( self.testWeather.values, nDays )
         xTest1 = self.weatherScaler.transform( xTest1 )
 
+        floodDate = 23 # HARD CODED!!!
+
         flows = self.predFlowRates( xTest1 )
+        if kwargs[ 'fudge' ]:
+            stations = self.hydro.columns
+            fudgeFile = open( kwargs[ 'fudgeFile' ] )
+            for line in fudgeFile:
+                station = int( line.split()[ 0 ] )
+                flow = float( line.split()[ 1 ] )
+                dim = np.where( stations == station )[ 0 ][ 0 ]
+                flows[ floodDate, dim ] = flow
+
+            fudgeFile.close()
+            
         
         xTest2 = self.setDelay( flows, nDays )
         xTest2 = self.flowScaler.transform( xTest2 )
@@ -519,6 +535,25 @@ class Basin:
 
         lakeStart = self.lake.loc[ self.testDates[ 0 ] ].values
         lakePreds = lakeStart + np.cumsum( lakeChanges )
+
+        dates = self.testDates
+        lakeActual = self.lake.loc[ dates ].values
+
+        plt.clf()
+        
+        plt.plot( dates, lakeActual, 'b', label = 'Historical' )
+        plt.plot( dates, lakePreds, 'r', label = 'Simulated Flood' )
+        plt.ylabel( 'Lake Travis Elevation (ft)' )
+        plt.xlabel( 'Date' )
+        plt.legend()
+
+        fig = plt.gcf()
+        fig.autofmt_xdate()
+        
+        
+        plt.savefig( 'flood.png' )
+        
+
 
         import pdb; pdb.set_trace()
 
@@ -559,10 +594,13 @@ if __name__ == '__main__':
                'nDays': 0,
                'maxFill': 5,
                'completenessThreshold': .5,
+               'simpleModel': True,
                'testWeatherFile': '/Users/jardel/blog/drought/noaa.weather.raw',
                'testStartDate': '2012-12-01',
                'testEndDate': '2012-12-31',
                'floodStartDate': '2012-12-24',
-               'floodEndDate': '2012-12-24'
+               'floodEndDate': '2012-12-24',
+               'fudge': True,
+               'fudgeFile': '/Users/jardel/blog/drought/historical_flows.dat'
                }
     main( **kwargs )
