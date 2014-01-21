@@ -9,6 +9,11 @@ from sklearn.ensemble import ExtraTreesRegressor
 from scipy.interpolate import griddata
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.linear_model import RidgeCV
+from sklearn import preprocessing
+
+
+# Big rainfall rates are not getting converted properly into big stream flows
+# I need to find some data of a flood or a wet year (maybe 2007?) to train on.
 
 
 # training data are all hydromet sites + rainfall totals for all site for 10 days
@@ -255,34 +260,46 @@ class Basin:
         xTrain = self.setDelay( rainData, kwargs[ 'nDays' ] )
         yTrain = flowData
 
+        #weatherPCA = PCA( n_components = 50, whiten = True )
+        #xTrain = weatherPCA.fit_transform( xTrain )
+
+        weatherScaler = preprocessing.StandardScaler().fit( xTrain )
+        xTrain = weatherScaler.transform( xTrain )
+        self.weatherScaler = weatherScaler
+
         model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
-                                     random_state = 42, max_features = 'sqrt' )
+                                     random_state = 42 )
             
 
         #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
         model.fit( xTrain, yTrain )
 
         self.flowModel = model
+        #self.weatherPCA = weatherPCA
 
     def fitLakeLevels( self, flowData, lakeData, **kwargs ):
         # model lake levels from stream flows
         
         xTrain = self.setDelay( flowData, kwargs[ 'nDays' ] )
 
+        flowScaler = preprocessing.StandardScaler().fit( xTrain )
+        xTrain = flowScaler.transform( xTrain )
+        self.flowScaler = flowScaler
+
         # fit to daily changes in elevation
         yTrain = lakeData - np.roll( lakeData, 1 )
         yTrain[ 0 ] = 0.
+
         
         model = ExtraTreesRegressor( n_estimators = 50, n_jobs = 4,
-                                     random_state = 42 )#, oob_score = True )
-        #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
+                                     random_state = 42 )
         
+        #model = RidgeCV( alphas = np.logspace( -2., 2. ) )
         model.fit( xTrain, yTrain )
 
         self.lakeModel = model
-        
+        #self.flowPCA = flowPCA
         ypreds = model.predict( xTrain )
-
         lakePreds = lakeData[ 0 ] + np.cumsum( ypreds )
 
         plt.clf()
@@ -393,16 +410,19 @@ class Basin:
         return miles
 
     def flood( self, **kwargs ):
-        
 
         # define a function to distribute rainfall based on distance from
         # center of the storm.  Using a gaussian for now..
 
-        center = [ 30.438758,-97.931812 ] # latlon
-        dispersion = 70. # miles
+        center = [ 30.438758,-97.931812 ] # lake travis
+        #center = [ 30.816167,-98.412888 ] # lake buchannan
+        
+        dispersion = 100. # miles
 
         # FWHM = 2.35 * dispersion
         height = 3048. # tenths of mm ( = 1 foot ) max rainfall
+
+        #height *= 3
 
         # then call latlonToMiles on each station to determine
         # that station's distance from the epicenter
@@ -418,10 +438,37 @@ class Basin:
                 dist = self.latlonToMiles( center, stations[ key ] )
                 rain = self.gaussian( dist, height, dispersion )
                 weather.loc[ date, key ] = rain
+
+        # write out grid of lat/lon vs rainfall for plotting in R
+        """
+        latSpacing = np.linspace( center[ 0 ] - 1., center[ 0 ] + 1, num = 1000 )
+        lonSpacing = np.linspace( center[ 1 ] - 1., center[ 1 ] + 1, num = 1000 )
+
+        latlonGrid = np.meshgrid( latSpacing, lonSpacing )
+        getDists = np.vectorize( self.latlonToMiles )
+        dists = getDists( center, latlonGrid )
+
+        getRain = np.vectorize( self.gaussian )
+        rain = getRain( dists, height, dispersion )
+
+        fp = open( 'rainfall.out', 'w' )
+        for i, j in zip( latlonGrid, rain ):
+            out = str( i[ 0 ] ) + ' ' + str( i[ 1 ] ) + ' ' + str( j ) + '\n'
+            fp.write( out )
+
+        fp.close()
+        """    
+            
+            
         
+        
+        
+        
+                
         self.testWeather = weather
 
     def interpolateTestWeather( self, **kwargs ):
+        # don't call this method any more
 
         df = pd.DataFrame( np.nan, index = self.testDates,
                            columns = self.weather.columns )
@@ -457,62 +504,23 @@ class Basin:
 
     def predictForward( self, **kwargs ):
 
-        # new idea:
         # have stream flows predict delta lake height.  Track
         # lake levels from these deltas
 
         nDays = kwargs[ 'nDays' ]
         xTest1 = self.setDelay( self.testWeather.values, nDays )
-        flows = self.predFlowRates( xTest1 ) # these are almost identical!!!
+        xTest1 = self.weatherScaler.transform( xTest1 )
 
+        flows = self.predFlowRates( xTest1 )
+        
         xTest2 = self.setDelay( flows, nDays )
+        xTest2 = self.flowScaler.transform( xTest2 )
         lakeChanges = self.predLakeLevels( xTest2 )
 
         lakeStart = self.lake.loc[ self.testDates[ 0 ] ].values
         lakePreds = lakeStart + np.cumsum( lakeChanges )
 
         import pdb; pdb.set_trace()
-        
-        
-        
-        
-
-        """
-        lakeLevels = []
-
-
-        allTestWeather = self.setDelay( self.testWeather.values, nDays )
-        startingWeather = allTestWeather[ :nDays + 1, : ]
-
-        startingFlows = self.predFlowRates( startingWeather )
-        startingFlows = self.setDelay( startingFlows, nDays )
-        
-        startingLakes = self.predLakeLevels( startingFlows ).tolist()
-        lakeLevels += startingLakes[ :-1 ]
-        
-        lake = startingLakes[ -1 ]
-        
-        for iDate in range( nDays + 1, len( self.testDates ) ):
-            lakeLevels.append( lake )
-            #weather =  self.testWeather.loc[ date ].values
-            weather = self.setDelay( self.testWeather.values, nDays )[ iDate, : ]
-            
-            predflows = self.predFlowRates( weather )[ 0 ]
-            #flows = self.setDelay( predflows, nDays )
-
-            flows = predflows
-
-            # kluge to re-copy the flows nDays times
-            for i in range( nDays ):
-                flows = np.hstack( ( flows, predflows ) )
-
-            # is the delay really being set in flows?
-
-            flows = np.hstack( ( flows, lake ) )
-            lake = self.predLakeLevels( flows ).tolist()[ 0 ]
-
-        import pdb; pdb.set_trace()
-        """
 
     def predFlowRates( self, inpWeather ):
 
@@ -523,41 +531,6 @@ class Basin:
         model = self.lakeModel
         return model.predict( inpFlows )
 
-    # DEPRECATED
-    """
-    def predFlowRates( self, **kwargs ):
-
-        print 'predicting new flow rates'
-        
-        nDays = kwargs[ 'nDays']
-        model = self.flowModel
-
-        xTest = self.setDelay( self.testWeather.values, nDays )
-        yTest = model.predict( xTest )
-
-        self.testFlows = yTest
-
-    def predLakeLevels( self, **kwargs ):
-
-        print 'predicting new lake levels'
-
-        nDays = kwargs[ 'nDays' ]
-        model = self.lakeModel
-        xTest = self.setDelay( self.testFlows, nDays )
-
-        # historical lake levels
-        historical = self.lake.loc[ self.testDates ].values
-
-        xTest = np.column_stack( ( xTest, np.roll( historical, 1 ) ) )
-        yTest = model.predict( xTest )
-
-        import pdb; pdb.set_trace()
-
-    """ 
-        
-
-    
-    
 
 
 def main( **kwargs ):
@@ -577,19 +550,19 @@ def main( **kwargs ):
 
 if __name__ == '__main__':
     kwargs = { 'lakeFile': '/Users/jardel/blog/drought/travis_levels.dat',
-               'weatherFile': '/Users/jardel/blog/drought/noaa.weather.raw',
+               'weatherFile': '/Users/jardel/blog/drought/noaa.weather.big',
                'hydroFile': '/Users/jardel/blog/drought/usgs.dailyaverages/output',
                'stationFile': '/Users/jardel/blog/drought/stations.list',
                'stationNamesFile': '/Users/jardel/blog/drought/stations.latlon',
-               'startDate': '2011-01-01',
+               'startDate': '2007-10-01',
                'endDate': '2012-12-31',
-               'nDays': 2,
+               'nDays': 0,
                'maxFill': 5,
                'completenessThreshold': .5,
                'testWeatherFile': '/Users/jardel/blog/drought/noaa.weather.raw',
                'testStartDate': '2012-12-01',
                'testEndDate': '2012-12-31',
                'floodStartDate': '2012-12-24',
-               'floodEndDate': '2012-12-26'
+               'floodEndDate': '2012-12-24'
                }
     main( **kwargs )
