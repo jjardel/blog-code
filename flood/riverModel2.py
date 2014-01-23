@@ -4,32 +4,11 @@ import csv
 import matplotlib.pyplot as plt
 import shapefile as sf
 from sklearn import metrics
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.ensemble import ExtraTreesRegressor
-from scipy.interpolate import griddata
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.linear_model import RidgeCV
 from sklearn import preprocessing
 
-
-def penalizedScorer( estimator, x, y ):
-    preds = estimator.predict( x )
-    mse = metrics.mean_squared_error( y, preds )
-
-    negative = np.where( preds < 0. )[ 0 ]
-    C = 1000.
-    penalty = C * np.abs( preds[ negative ] ).sum() 
-
-    score = -1. * mse + penalty
-    print penalty
-    import pdb; pdb.set_trace()
-    return score
-
-
-
-
-# training data are all hydromet sites + rainfall totals for all site for 10 days
-# before and after every lake travis observation
 
 class Basin:
     """
@@ -80,7 +59,7 @@ class Basin:
                    
 
     def readWeather( self, dates, test = None, **kwargs ):
-        # read in the rainfall data
+        # read in the rainfall data for either training case or test case
 
         if test:
             filepath = kwargs[ 'testWeatherFile' ]
@@ -97,7 +76,7 @@ class Basin:
                 stationNames.add( name )
 
         if test:
-            stationNames = self.weather.columns
+            stationNames = self.weather.columns # use same stations as training
 
         df = pd.DataFrame( np.nan, index = dates, columns = stationNames )
         stations = {}
@@ -113,7 +92,6 @@ class Basin:
                     if not test or ( test and name in stationNames ):
                         df.loc[ date, name ] = rain # pandas is cool
                     
-
                 if name not in stations.keys():
                     try:
                         stations[ name ] = [ float( row[ 3 ] ),
@@ -122,8 +100,6 @@ class Basin:
                         stations[ name ] = [ 0., 0. ]
 
         # fill missing values
-
-
         threshold = kwargs[ 'completenessThreshold' ]
         nExamples = df.shape[ 0 ]
         nGood = df.count()
@@ -133,8 +109,6 @@ class Basin:
         if not test:
             dropList = completeness[ completeness < threshold ].index.tolist()
             df = df.drop( dropList, axis = 1  )
-
-        
 
         # fill forward up to a limit
         df.fillna( method = 'pad', limit = kwargs[ 'maxFill' ], inplace = True )
@@ -272,6 +246,7 @@ class Basin:
         xTrain = self.setDelay( rainData, kwargs[ 'nDays' ] )
         yTrain = flowData
 
+        # perform feature scaling
         weatherScaler = preprocessing.StandardScaler().fit( xTrain )
         xTrain = weatherScaler.transform( xTrain )
         self.weatherScaler = weatherScaler
@@ -386,13 +361,16 @@ class Basin:
 
 
     def predict( self, **kwargs ):
+        # use this method to predict future lake levels from rainfall data.
+        # Calls modelHistorical() to first train the model
+        
         self.modelHistorical( **kwargs )
 
         self.testDates = pd.date_range( kwargs[ 'testStartDate' ],
                                         kwargs[ 'testEndDate' ] )
 
         self.readWeather( self.testDates, test = True, **kwargs )
-        self.flood( **kwargs )
+        self.flood( **kwargs ) # make up a simulated flood
         
         # use fitted model to predict new flows and lake levels
 
@@ -454,7 +432,7 @@ class Basin:
         # FWHM = 2.35 * dispersion
         height = 3048. # tenths of mm ( = 1 foot ) max rainfall
 
-        #height *= 3
+        #height *= 5.
 
         # then call latlonToMiles on each station to determine
         # that station's distance from the epicenter
@@ -472,8 +450,8 @@ class Basin:
                 weather.loc[ date, key ] = rain
 
         # write out grid of lat/lon vs rainfall for plotting in R
-        latSpacing = np.linspace( center[ 0 ] - 1., center[ 0 ] + 1, num = 1000 )
-        lonSpacing = np.linspace( center[ 1 ] - 1., center[ 1 ] + 1, num = 1000 )
+        latSpacing = np.linspace( center[ 0 ] - 8., center[ 0 ] + 8, num = 200 )
+        lonSpacing = np.linspace( center[ 1 ] - 8., center[ 1 ] + 8, num = 200 )
 
         grid = np.meshgrid( latSpacing, lonSpacing )
         latlonGrid = zip( *[ x.flat for x in grid ] )
@@ -496,7 +474,8 @@ class Basin:
 
         fp = open( 'rainfall.out', 'w' )
         for i, j in zip( latlonGrid, rain ):
-            out = str( i[ 0 ] ) + ',' + str( i[ 1 ] ) + ',' + str( j ) + '\n'
+            inches = j / 3048. * 12
+            out = str( i[ 0 ] ) + ',' + str( i[ 1 ] ) + ',' + str( inches ) + '\n'
             fp.write( out )
 
         fp.close()
