@@ -9,7 +9,11 @@ shinyServer(function(input, output) {
             "efficiency", "outOfWarranty", "loyalty", "growth" )
   
   # consider scaling from 0 to 1
-  p = scale( performance[ ,2:7 ] )
+  #p = scale( performance[ ,2:7 ] )
+
+  maxs = apply(performance[ ,2:7 ], 2, max)    
+  mins = apply(performance[ ,2:7 ], 2, min)
+  p = scale( performance[ ,2:7 ], center = mins, scale = maxs - mins)
   #p = transform( p, dealerID = performance$dealerID )
   
   # Reactive expression to generate the requested distribution. This is 
