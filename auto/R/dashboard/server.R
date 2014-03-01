@@ -1,5 +1,6 @@
 library(shiny)
 library( plotrix )
+library( plyr )
 
 # Define server logic for random distribution application
 shinyServer(function(input, output) {
@@ -72,11 +73,33 @@ shinyServer(function(input, output) {
     idx = subset( performance, dealerID == topID )[ 1 ]
     idx = as.integer( row.names( idx ) )
     y = p[ idx, ]
-    radial.plot( y, labels = names( y ), rp.type="p",
-                radial.lim = c( 0, max( y ) ) )
+    prettyLabels = c( "Volume", "Sales", "Efficiency",
+      "Out of Warranty Sales", "Customer Loyalty", "Growth" )
+      
+    radial.plot( y, labels = prettyLabels, rp.type="p",
+                radial.lim = c( 0, 1), poly.col = "blue" )
     
 
   })
+
+  output$performance <- renderTable({
+    names( performance )[ 1 ] = 'Dealer ID'
+    top10 = getTop10()
+    topPerformance = join( performance, top10, by = 'Dealer ID', type = 'right' )
+    topPerformance$sales = topPerformance$sales / 1000000
+    prettyNames = c( 'Dealer ID', 'Volume (Number of ROs)', 'Sales ($Millions)',
+      'Efficiency ( Sales/Labor Time)', 'Percentage Out of Warranty Sales',
+    'Percentage Repeat Customers', 'Growth ($Thousands/Quarter)', 'Rating' )
+    names( topPerformance ) = prettyNames
+
+    topPerformance
+    
+
+  })
+  
+
+  # idea: maybe treat this like an optimization problem and try to
+  # to find the set of weights that makes the score the largest
   
   # Generate an HTML table view of the data
 #  output$table <- renderTable({

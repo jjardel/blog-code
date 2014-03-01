@@ -68,7 +68,7 @@ shinyUI(pageWithSidebar(
   # of the generated distribution
   mainPanel(
     tabsetPanel(
-      tabPanel("Dealer Performance", tableOutput("ranking"),
+      tabPanel("Dealer Performance", tableOutput( "performance" ),
                h4( "Top Performing Dealer" ), plotOutput( "spiderweb" )
                ), 
       tabPanel("Clustering", verbatimTextOutput("summary")), 
