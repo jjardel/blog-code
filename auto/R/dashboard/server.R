@@ -87,6 +87,8 @@ shinyServer(function(input, output) {
     top10 = getTop10()
     topPerformance = join( performance, top10, by = 'Dealer ID', type = 'right' )
     topPerformance$sales = topPerformance$sales / 1000000
+    topPerformance$outOfWarranty = topPerformance$outOfWarranty * 100
+    topPerformance$loyalty = topPerformance$loyalty * 100
     prettyNames = c( 'Dealer ID', 'Volume (Number of ROs)', 'Sales ($Millions)',
       'Efficiency ( Sales/Labor Time)', 'Percentage Out of Warranty Sales',
     'Percentage Repeat Customers', 'Growth ($Thousands/Quarter)', 'Rating' )
