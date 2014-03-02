@@ -3,6 +3,33 @@ import numpy as np
 import datetime as dt
 import pandas as pd
 from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
+
+def plotBest( df, slopes, intercepts ):
+    bestGrowth = -1e10
+    for dealer in slopes:
+        if slopes[ dealer ] > bestGrowth:
+            bestGrowth = slopes[ dealer ]
+            bestDealer = dealer
+
+    y = df.loc[ :, bestDealer ].values
+    x = np.array( range( 1, len( df.index ) + 1 ) )
+
+    y = y[ np.isfinite( y ) ] / 1e6
+    x = x[ np.isfinite( y ) ]
+
+    yFit = slopes[ bestDealer ] * x + intercepts[ bestDealer ]
+    yFit /= 1e3 # this is already in units of thousands/quarter
+
+    plt.plot( x, y, 'ko' )
+    plt.plot( x, yFit, 'r' )
+    plt.xlabel( 'Quarter' )
+    plt.ylabel( 'Sales (Millions)' )
+    plt.xlim( [ 0., 8. ] )
+    
+    plt.savefig( 'growth.png' )
+
+    
 
 def main( **kwargs ):
 
@@ -45,6 +72,7 @@ def main( **kwargs ):
     # linear fit to quarterly sales to determine quarterly growth
 
     growthFactor = {}
+    intercept = {}
     for dealer in salesFrame.columns:
         sales = salesFrame.loc[ :, dealer ].values
         quarters = np.arange( nQuarters )
@@ -58,10 +86,12 @@ def main( **kwargs ):
             clf.fit( xTrain, yTrain )
             # growth = slope of line (thousands/quarter)
             growthFactor[ dealer ] = clf.coef_[ 0 ]
+            intercept[ dealer ] = clf.intercept_
         else:
             # fill with mean growth
             print 'not enough results for dealer ', dealer
             growthFactor[ dealer ] = np.mean( growthFactor.values() )
+            intercept[ dealer ] = np.mean( intercept.values() )
 
     # insert calculated growth into SQL DB
     statement = """DROP TABLE growth"""
@@ -78,11 +108,15 @@ def main( **kwargs ):
     cursor.executemany( statement, ins )
     conn.commit()
 
+    if kwargs[ 'plotBest' ]:
+        plotBest( salesFrame, growthFactor, intercept )
+        
 if __name__ == '__main__':
     kwargs = { 'dbPath': '/Users/jardel/SR/subset.sql',
                'startDate': dt.date( 2010, 06, 30 ),
                'nQuarters': 7,
-               'minThresholdforFit': 3
+               'minThresholdforFit': 3,
+               'plotBest': True
                }
     main( **kwargs )
         
