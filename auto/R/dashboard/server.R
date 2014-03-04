@@ -6,44 +6,26 @@ library( plyr )
 shinyServer(function(input, output) {
 
   performance = read.csv( 'metric1.out' )
-  colnames( performance ) = c( "dealerID", "volume", "sales",
+  colnames( performance ) = c( "dealerID", "sales",
             "efficiency", "outOfWarranty", "loyalty", "growth" )
   
-  # consider scaling from 0 to 1
-  #p = scale( performance[ ,2:7 ] )
+  # scaling each feature to [0, 1] range
 
-  maxs = apply(performance[ ,2:7 ], 2, max)    
-  mins = apply(performance[ ,2:7 ], 2, min)
-  p = scale( performance[ ,2:7 ], center = mins, scale = maxs - mins)
-  #p = transform( p, dealerID = performance$dealerID )
-  
-  # Reactive expression to generate the requested distribution. This is 
-  # called whenever the inputs change. The output functions defined 
-  # below then all use the value computed from this expression
+  maxs = apply(performance[ ,2:6 ], 2, max)    
+  mins = apply(performance[ ,2:6 ], 2, min)
+  p = scale( performance[ ,2:6 ], center = mins, scale = maxs - mins)
 
+  # standard scaling
+  #p = scale( performance[ ,2:6 ], center = TRUE, scale = TRUE )
   
+  # reactive expression to calculate weights interactively
   weights = reactive({
-    getWeights = c( input$wVolume, input$wSales, input$wEfficiency,
+    getWeights = c( input$wSales, input$wEfficiency,
       input$wOutOfWarranty, input$wLoyalty, input$wGrowth )
     getWeights
     
   })
-  # Generate a plot of the data. Also uses the inputs to build the 
-  # plot label. Note that the dependencies on both the inputs and
-  # the data reactive expression are both tracked, and all expressions 
-  # are called in the sequence implied by the dependency graph
-#  output$plot <- renderPlot({
-#    dist <- input$dist
-#    n <- input$n
-#    
-#    hist(data(), 
-#         main=paste('r', dist, '(', n, ')', sep=''))
-#  })
-
-#  topDealerSummary <- reactive({
-#    weights = c( input$wVolume, input$wSales, input$wEfficiency,
-#      input$wOutOfWarranty, input$wLoyalty, input$wGrowth )
-
+  
   normalize <- reactive({
     results = p %*% weights() / sum( weights() )
     results = data.frame( dealerID = performance$dealerID, Rating = results )
@@ -52,6 +34,7 @@ shinyServer(function(input, output) {
     
   getTop10 <- reactive({
     results = normalize()
+    #write.csv( results, file = 'ranking.csv' )
     top10 = results[ with( results, order( -Rating ) ), ]
     top10$Rating = top10$Rating / max( top10$Rating )
     top10 = head( top10, n = 10 )
@@ -73,7 +56,7 @@ shinyServer(function(input, output) {
     idx = subset( performance, dealerID == topID )[ 1 ]
     idx = as.integer( row.names( idx ) )
     y = p[ idx, ]
-    prettyLabels = c( "Volume", "Sales", "Efficiency",
+    prettyLabels = c(  "Sales", "Efficiency",
       "Out of Warranty Sales", "Customer Loyalty", "Growth" )
       
     radial.plot( y, labels = prettyLabels, rp.type="p",
@@ -86,16 +69,30 @@ shinyServer(function(input, output) {
     names( performance )[ 1 ] = 'Dealer ID'
     top10 = getTop10()
     topPerformance = join( performance, top10, by = 'Dealer ID', type = 'right' )
+    
     topPerformance$sales = topPerformance$sales / 1000000
     topPerformance$outOfWarranty = topPerformance$outOfWarranty * 100
     topPerformance$loyalty = topPerformance$loyalty * 100
-    prettyNames = c( 'Dealer ID', 'Volume (Number of ROs)', 'Sales ($Millions)',
+    prettyNames = c( 'Dealer ID', 'Sales ($Millions)',
       'Efficiency ( Sales/Labor Time)', 'Percentage Out of Warranty Sales',
-    'Percentage Repeat Customers', 'Growth ($Thousands/Quarter)', 'Rating' )
+    'Percentage Repeat Customers', 'Normalized Growth', 'Rating' )
     names( topPerformance ) = prettyNames
-
     topPerformance
-    
+
+  })
+
+    output$stats <- renderPrint({
+      # calculate summary stats for best value in each column
+      prettyNames = c( 'dealer id', 'Sales',
+        'Efficiency', 'Percentage Out of Warranty Sales',
+        'Percentage Repeat Customers', 'Normalized Growth' )
+      performance$sales = performance$sales / 1000000
+      performance$outOfWarranty = performance$outOfWarranty * 100
+      performance$loyalty = performance$loyalty * 100
+      names( performance ) = prettyNames
+      
+      summary( performance[ ,2:6 ] )
+
 
   })
   

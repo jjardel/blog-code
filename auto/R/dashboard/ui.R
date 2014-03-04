@@ -17,47 +17,40 @@ shinyUI(pageWithSidebar(
     #               "Exponential" = "exp")),
     #br(),
     
-    sliderInput("wVolume", 
-                "Volume:", 
-                 value = 1,
-                 min = 0., 
-                 max = 6.,
-                 step = 0.1),
-               
    sliderInput( "wSales",
                 "Sales:",
-                value = 1.,
+                value = 0.2,
                 min = 0.,
-                max = 6.,
-                step = 0.1 ),
+                max = 1.,
+                step = 0.05 ),
                
    sliderInput( "wEfficiency",
                 "Efficiency:",
-                value = 1.,
+                value = 0.2,
                 min = 0.,
-                max = 6.,
-                step = 0.1 ),
+                max = 1.,
+                step = 0.05 ),
                
    sliderInput( "wOutOfWarranty",
                 "Out of Warranty Sales:",
-                value = 1.,
+                value = .2,
                 min = 0.,
-                max = 6.,
-                step = 0.1 ),
+                max = 1.,
+                step = 0.05 ),
                
    sliderInput( "wLoyalty",
                 "Customer Loyalty:",
-                value = 1.,
+                value = 0.2,
                 min = 0.,
-                max = 6.,
-                step = 0.1 ),
+                max = 1.,
+                step = 0.05 ),
                
    sliderInput( "wGrowth",
                 "Growth:",
-                value = 1.,
+                value = 0.2,
                 min = 0.,
-                max = 6.,
-                step = 0.1 )
+                max = 1.,
+                step = 0.05 )
                
                
    
@@ -69,6 +62,7 @@ shinyUI(pageWithSidebar(
   mainPanel(
     tabsetPanel(
       tabPanel("Dealer Performance", tableOutput( "performance" ),
+               verbatimTextOutput( "stats" ),
                h4( "Top Performing Dealer" ), plotOutput( "spiderweb" )
                ), 
       tabPanel("Clustering", verbatimTextOutput("summary")), 
