@@ -3,8 +3,10 @@ import pandas as pd
 import sqlite3 as sql
 import matplotlib.pyplot as plt
 import csv
-from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
+from sklearn.manifold import Isomap
 from sklearn.metrics import silhouette_score
 
 # read in aggregate data on each dearlership from DB.  Then cluster the 96
@@ -12,7 +14,18 @@ from sklearn.metrics import silhouette_score
 
 class Model:
     def __init__( self, **kwargs ):
-        self.readData( **kwargs )
+        #self.readData( **kwargs )
+        self.readROs( kwargs[ 'pathToDB' ] )
+
+    def readROs( self, dbPath ):
+        conn = sql.connect( dbPath )
+        cursor = conn.cursor()
+        query = """ SELECT Mileage, Customer_Total, Warranty_Total,
+                    Customer_Total + Warranty_Total + Internal_Total AS sales,
+                    Labor_Time FROM orders WHERE Mileage != '';"""
+        cursor.execute( query )
+        res = cursor.fetchall()
+        self.orders = np.array( res, dtype = 'float' )
 
     def readData( self, **kwargs ):
         # read in data from SQL DB to a pandas data frame
@@ -20,8 +33,12 @@ class Model:
         conn = sql.connect( path )
         cursor = conn.cursor()
 
-        query = """SELECT dealer_id, num_ROs, sales, efficiency, outOfWarrantyFraction,
-                           quarterly_growth FROM metric1;"""
+        #query = """SELECT dealer_id, num_ROs, sales, efficiency, outOfWarrantyFraction,
+        #                   quarterly_growth FROM metric1;"""
+        query = """select dealer_id, avg( mileage ), avg( labor_time ),
+                       avg( model_year ),
+                       avg( customer_total + warranty_total + internal_total )
+                       as avg_sale from orders group by dealer_id; """
         cursor.execute( query )
         res = cursor.fetchall()
         res = np.array( res )
@@ -29,9 +46,9 @@ class Model:
         tmp = res[ :, 0 ]
         dealerIDs = [ int( x ) for x in tmp ]
         df = pd.DataFrame( np.nan, index = dealerIDs,
-                           columns = [ "volume", "sales", "efficiency", "outOfWarranty",
-                                       "growth", "marketAffluence", "primaryMake" ] )
-        df.iloc[ :, :5 ] = res[ :, 1: ]
+                           columns = [ "mileage", "labor_time", "model_year", 
+                                       "sale", "marketAffluence", "primaryMake" ] )
+        df.iloc[ :, :4 ] = res[ :, 1: ]
 
         # Fill up a dictionary containing median household income for each zip code
         zipDict = {}
@@ -94,6 +111,21 @@ class Model:
                 
         self.data = df
 
+    def ML( self ):
+        #data = self.data.values[ :, :-3 ]
+        data = self.orders
+        scaler = MinMaxScaler()
+        #scaler = StandardScaler()
+        X = scaler.fit_transform( data )
+        #X = data
+
+        isomap = Isomap( n_components = 2 )
+        isomap.fit( X )
+        #print pca.explained_variance_ratio_
+        import pdb; pdb.set_trace()
+
+        
+
     def findBestClustering( self, maxClusters = 10 ):
         cost = []
         score = []
@@ -114,7 +146,6 @@ class Model:
         # feature scaling
         scaler = MinMaxScaler()
         X = scaler.fit_transform( data )
-        self.scaler = scaler
         
         kmeans = MiniBatchKMeans( nClusters, n_init = 50 )
         kmeans.fit( X )
@@ -129,7 +160,7 @@ class Model:
 
 def main( **kwargs ):
     model = Model( **kwargs )
-    model.findBestClustering()
+    model.ML()
     import pdb; pdb.set_trace()
 
 if __name__ == '__main__':

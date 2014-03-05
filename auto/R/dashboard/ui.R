@@ -64,9 +64,12 @@ shinyUI(pageWithSidebar(
       tabPanel("Dealer Performance", tableOutput( "performance" ),
                verbatimTextOutput( "stats" ),
                h4( "Top Performing Dealer" ), plotOutput( "spiderweb" )
-               ), 
-      tabPanel("Clustering", verbatimTextOutput("summary")), 
-      tabPanel("Coupon Study", tableOutput("table"))
+               ),
+      tabPanel("Markets", plotOutput("markets") ),
+      tabPanel("Order Types", plotOutput("orderTypes") )
+
+#               br(),
+#               plotOutput("map" ))
     )
   )
 ))

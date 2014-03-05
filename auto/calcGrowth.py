@@ -12,22 +12,27 @@ def plotBest( df, slopes, intercepts ):
             bestGrowth = slopes[ dealer ]
             bestDealer = dealer
 
-    y = df.loc[ :, bestDealer ].values
-    x = np.array( range( 1, len( df.index ) + 1 ) )
+    vals = df.loc[ :, bestDealer ].values
+    x = np.array( range( len( df.index )  ) )
+    
+    # get this scaling right
 
-    y = y[ np.isfinite( y ) ] / 1e6
-    x = x[ np.isfinite( y ) ]
+    y = vals[ np.isfinite( vals ) ] / 1e6
+    x = x[ np.isfinite( vals ) ]
 
     yFit = slopes[ bestDealer ] * x + intercepts[ bestDealer ]
     yFit /= 1e3 # this is already in units of thousands/quarter
 
+    plt.clf()
     plt.plot( x, y, 'ko' )
     plt.plot( x, yFit, 'r' )
     plt.xlabel( 'Quarter' )
-    plt.ylabel( 'Sales (Millions)' )
+    plt.ylabel( 'Sales' )
     plt.xlim( [ 0., 8. ] )
     
     plt.savefig( 'growth.png' )
+
+    import pdb; pdb.set_trace()
 
     
 
@@ -57,7 +62,8 @@ def main( **kwargs ):
     # create data frame to hold results
     salesFrame = pd.DataFrame( np.nan, index = range( nQuarters ), columns = dealerIDs )
 
-    query = """SELECT dealer_id, SUM( customer_total + warranty_total + internal_total )
+    query = """SELECT dealer_id,
+                      1.0 * SUM( customer_total + warranty_total + internal_total ) 
                       FROM orders WHERE ro_close_date BETWEEN ? AND ?
                       GROUP BY dealer_id;"""
 
@@ -77,9 +83,17 @@ def main( **kwargs ):
         sales = salesFrame.loc[ :, dealer ].values
         quarters = np.arange( nQuarters )
 
+        # sigma clipping of outliers
+        median = np.median( sales )
+        std = np.std( sales )
+        sales[ sales < ( median - 2. * std ) ] = np.nan
+        sales[ sales > ( median + 2. * std ) ] = np.nan
+
+
         # filter nan
         xTrain = quarters[ np.isfinite( sales ), np.newaxis ]
         yTrain = sales[ np.isfinite( sales ) ] / 1000.
+        #yTrain = sales[ np.isfinite( sales ) ] 
 
         if yTrain.shape[ 0 ] >= kwargs[ 'minThresholdforFit' ]:
             clf = LinearRegression( fit_intercept = True )
@@ -115,7 +129,7 @@ if __name__ == '__main__':
     kwargs = { 'dbPath': '/Users/jardel/SR/subset.sql',
                'startDate': dt.date( 2010, 06, 30 ),
                'nQuarters': 7,
-               'minThresholdforFit': 3,
+               'minThresholdforFit': 4,
                'plotBest': True
                }
     main( **kwargs )

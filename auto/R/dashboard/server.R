@@ -1,6 +1,9 @@
 library(shiny)
 library( plotrix )
 library( plyr )
+library( ggplot2 )
+library( ggmap )
+
 
 # Define server logic for random distribution application
 shinyServer(function(input, output) {
@@ -29,15 +32,15 @@ shinyServer(function(input, output) {
   normalize <- reactive({
     results = p %*% weights() / sum( weights() )
     results = data.frame( dealerID = performance$dealerID, Rating = results )
-    results
+    normalized = results[ with( results, order( -Rating ) ), ]
+    normalized$Rating = normalized$Rating / max( normalized$Rating )
+    normalized
   })
     
   getTop10 <- reactive({
     results = normalize()
     #write.csv( results, file = 'ranking.csv' )
-    top10 = results[ with( results, order( -Rating ) ), ]
-    top10$Rating = top10$Rating / max( top10$Rating )
-    top10 = head( top10, n = 10 )
+    top10 = head( results, n = 10 )
     ranks = seq( from = 1, to = dim( top10 )[ 1 ], by = 1 )
     row.names( top10 ) = ranks
     names( top10 )[ 1 ] = 'Dealer ID'
@@ -62,7 +65,6 @@ shinyServer(function(input, output) {
     radial.plot( y, labels = prettyLabels, rp.type="p",
                 radial.lim = c( 0, 1), poly.col = "blue" )
     
-
   })
 
   output$performance <- renderTable({
@@ -75,7 +77,7 @@ shinyServer(function(input, output) {
     topPerformance$loyalty = topPerformance$loyalty * 100
     prettyNames = c( 'Dealer ID', 'Sales ($Millions)',
       'Efficiency ( Sales/Labor Time)', 'Percentage Out of Warranty Sales',
-    'Percentage Repeat Customers', 'Normalized Growth', 'Rating' )
+    'Percentage Repeat Customers', 'Growth($Thousands/Quarter)', 'Rating' )
     names( topPerformance ) = prettyNames
     topPerformance
 
@@ -85,7 +87,7 @@ shinyServer(function(input, output) {
       # calculate summary stats for best value in each column
       prettyNames = c( 'dealer id', 'Sales',
         'Efficiency', 'Percentage Out of Warranty Sales',
-        'Percentage Repeat Customers', 'Normalized Growth' )
+        'Percentage Repeat Customers', 'Growth' )
       performance$sales = performance$sales / 1000000
       performance$outOfWarranty = performance$outOfWarranty * 100
       performance$loyalty = performance$loyalty * 100
@@ -95,14 +97,99 @@ shinyServer(function(input, output) {
 
 
   })
-  
 
-  # idea: maybe treat this like an optimization problem and try to
-  # to find the set of weights that makes the score the largest
+
+  getMakeData <- reactive({
+     rankings = normalize()
+     types = read.csv( 'orderTypes.out' )
+     names( types ) = c( "dealerID", "fracMaintenance", "fracRepair" )
+
+     cars = read.csv( 'makes.out' )
+     names( cars ) = c( 'dealerID', 'Make' )
+
+     df = join( types, rankings, by = "dealerID" )
+     dfWithCars = join( df, cars, by = "dealerID" )
+     dfWithCars$Make = factor( dfWithCars$Make,
+       labels = c( "Nissan", "Infiniti", "Other" ) )
+     dfWithCars
+
+   })
+
+  output$orderTypes <- renderPlot({
+    data = getMakeData()
+    names( data )[ 5 ] = "Dealer"
+    p = ggplot( data, aes( fracRepair*100, Rating, color = Dealer) ) +
+      geom_point() +
+      xlab( "Percentage of Service Orders that are Major Repairs" )
+
+  print( p )  
+
+  })
+
+  output$ttest <- renderPrint({
+    data = getMakeData()
+    nissan = subset( data, Make == 'Nissan' )$fracRepair
+    infiniti = subset( data, Make == 'Infiniti' )$fracRepair
+    res = t.test( nissan, infiniti, alternative = "less" )
+    print("Infiniti dealers perform a greater proportion of repairs (rather than maintenance) than Nissan dealers" )
+
+
+  })
+
+  output$map <- renderPlot({
+
+      baseMap <- get_map( location = c( lon = -96.78, 38.37 ),
+                       maptype="hybrid", source="google", zoom = 4)
+
+      map = ggmap( baseMap ) + geom_point( aes( x = lon, y = lat,
+      color = factor( Market ) ),  data = dealers )
+
+    print( map )
+    })
   
-  # Generate an HTML table view of the data
-#  output$table <- renderTable({
-#    data.frame(x=data())
-#  })
+  output$markets <- renderPlot({
+
+
+    bad = c( 10467, 7437, 9894, 10728, 15948 )
+    data = read.csv( 'market_segs.out' )
+    names( data ) <- c( "dealerID", "lat", "lon", "Market" )
+    data[ data$dealerID %in% bad, 2:3 ] = NA
+    dealers = data
+
+    rankings = normalize()
+    allData = join( dealers, rankings, by = 'dealerID', type = 'inner' )
+
+    inds = by( allData, allData$Market, function(X) X[ which.max(X$Rating),])
+    bestDealers = do.call( "rbind", inds )
+
+    mPerformance = join( performance, dealers, by = 'dealerID', type = 'inner' )
+    maxs = apply( mPerformance[ 2:6 ], 2, max )
+    mins = apply( mPerformance[ 2:6 ], 2, min )
+
+
+    norm = scale( mPerformance[ ,2:6 ], center = mins, scale = maxs - mins )
+    norm = transform( norm, dealerID = mPerformance$dealerID )
+    norm = transform( norm, Market = mPerformance$Market )
+
+    marketNames = c( "Midwest", "West", "Southwest", "Northeast", "Southeast" )
+    colors = c( "red", "yellow", "green", "blue", "purple" )
+
+    par( mfrow = c( 2, 3 ) )
+    for (i in 1:5) {
+      market.frame = apply( subset( norm, Market == i - 1 ), 2, mean )
+      radial.plot( market.frame[ 1:5 ],
+                  labels = c( "Sales", "Efficiency", "Out of Warranty",
+                  "Loyalty", "Growth" ), rp.type="p",
+                radial.lim = c( 0, 1), poly.col = colors[ i ],
+                  main = marketNames[ i ] )
+    }
+
+
+                  
+
+
+
+  })
+  
   
 })

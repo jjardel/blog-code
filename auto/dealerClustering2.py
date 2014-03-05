@@ -3,6 +3,8 @@ import pandas as pd
 import sqlite3 as sql
 import matplotlib.pyplot as plt
 import csv
+from sklearn.cluster import DBSCAN
+from sklearn.cluster import MiniBatchKMeans
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import silhouette_score
@@ -12,7 +14,24 @@ from sklearn.metrics import silhouette_score
 
 class Model:
     def __init__( self, **kwargs ):
-        self.readData( **kwargs )
+        dbPath = kwargs[ 'pathToDB' ]
+        rankFilePath = kwargs[ 'pathToRankFile' ]
+        self.readROs( dbPath )
+
+    def readROs( self, dbPath ):
+        conn = sql.connect( dbPath )
+        cursor = conn.cursor()
+        query = """ SELECT Mileage, Customer_Total, Warranty_Total,
+                    Customer_Total + Warranty_Total + Internal_Total AS sales,
+                    Labor_Time FROM orders WHERE Mileage != '';"""
+        cursor.execute( query )
+        res = cursor.fetchall()
+        self.orders = np.array( res, dtype = 'float' )
+
+        
+    def readDealerRanks( self, rankFilePath ):
+        pass
+        
 
     def readData( self, **kwargs ):
         # read in data from SQL DB to a pandas data frame
@@ -29,7 +48,7 @@ class Model:
         tmp = res[ :, 0 ]
         dealerIDs = [ int( x ) for x in tmp ]
         df = pd.DataFrame( np.nan, index = dealerIDs,
-                           columns = [ "volume", "sales", "efficiency", "outOfWarranty",
+                           columns = [ "volume", "sales", "efficiency","outOfWarranty",
                                        "growth", "marketAffluence", "primaryMake" ] )
         df.iloc[ :, :5 ] = res[ :, 1: ]
 
@@ -94,12 +113,12 @@ class Model:
                 
         self.data = df
 
-    def findBestClustering( self, maxClusters = 10 ):
+    def findBestClustering( self, maxClusters = 5 ):
         cost = []
         score = []
         for nClusters in range( 2, maxClusters ):
-            clustering, silhouette = self.cluster( nClusters )
-            cost.append( clustering.inertia_ )
+            inertia, silhouette = self.cluster( nClusters )
+            cost.append( inertia )
             score.append( silhouette )
 
         plt.plot( range( 2, maxClusters ), cost )
@@ -108,20 +127,23 @@ class Model:
         import pdb; pdb.set_trace()
         
         
-    def cluster( self, nClusters ):
-        data = self.data.values[ :, :-1 ]
+    def cluster( self ):
+        #data = self.data.values[ :, :-1 ]
+        data = self.orders
         
         # feature scaling
         scaler = MinMaxScaler()
         X = scaler.fit_transform( data )
-        self.scaler = scaler
         
-        kmeans = MiniBatchKMeans( nClusters, n_init = 50 )
-        kmeans.fit( X )
+        clf = KMeans( n_clusters = 3, n_init = 50, n_jobs = -1 )
+        clf.fit( X )
+
+        import pdb; pdb.set_trace()
+        
         labels = kmeans.labels_
 
         score = silhouette_score( X, labels, metric = 'euclidean' )
-        return kmeans, score
+        return kmeans.inertia_, score
     
         #self.inertia = kmeans.inertia_
         #self.silhouette_score = score
@@ -129,11 +151,12 @@ class Model:
 
 def main( **kwargs ):
     model = Model( **kwargs )
-    model.findBestClustering()
+    model.cluster()
     import pdb; pdb.set_trace()
 
 if __name__ == '__main__':
     kwargs = { 'pathToDB': 'subset.sql',
+               'pathToRankFile': 'ranking.csv',
                'pathToZIPFile': 'MedianZIP.csv'
                }
     main( **kwargs )
