@@ -1,21 +1,13 @@
 library(shiny)
 
-# Define UI for random distribution application 
+# Define UI for shiny app
 shinyUI(pageWithSidebar(
     
   # Application title
   headerPanel("Repair Order Data"),
   
-  # Sidebar with controls to select the random distribution type
-  # and number of observations to generate. Note the use of the br()
-  # element to introduce extra vertical spacing
+  # sidebar with weights to set interactively
   sidebarPanel(
-    #radioButtons("dist", "Distribution type:",
-    #             c("Normal" = "norm",
-    #               "Uniform" = "unif",
-    #               "Log-normal" = "lnorm",
-    #               "Exponential" = "exp")),
-    #br(),
     
    sliderInput( "wSales",
                 "Sales:",
@@ -57,8 +49,6 @@ shinyUI(pageWithSidebar(
   ),
   
   
-  # Show a tabset that includes a plot, summary, and table view
-  # of the generated distribution
   mainPanel(
     tabsetPanel(
       tabPanel("Dealer Performance", tableOutput( "performance" ),

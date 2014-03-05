@@ -5,7 +5,7 @@ library( ggplot2 )
 library( ggmap )
 
 
-# Define server logic for random distribution application
+# Define server logic for shiny app
 shinyServer(function(input, output) {
 
   performance = read.csv( 'metric1.out' )
@@ -67,6 +67,7 @@ shinyServer(function(input, output) {
     
   })
 
+  # output a table of the 10 best dealers
   output$performance <- renderTable({
     names( performance )[ 1 ] = 'Dealer ID'
     top10 = getTop10()
@@ -100,6 +101,7 @@ shinyServer(function(input, output) {
 
 
   getMakeData <- reactive({
+    # takes the vehicle make data into account
      rankings = normalize()
      types = read.csv( 'orderTypes.out' )
      names( types ) = c( "dealerID", "fracMaintenance", "fracRepair" )
@@ -126,30 +128,10 @@ shinyServer(function(input, output) {
 
   })
 
-  output$ttest <- renderPrint({
-    data = getMakeData()
-    nissan = subset( data, Make == 'Nissan' )$fracRepair
-    infiniti = subset( data, Make == 'Infiniti' )$fracRepair
-    res = t.test( nissan, infiniti, alternative = "less" )
-    print("Infiniti dealers perform a greater proportion of repairs (rather than maintenance) than Nissan dealers" )
-
-
-  })
-
-  output$map <- renderPlot({
-
-      baseMap <- get_map( location = c( lon = -96.78, 38.37 ),
-                       maptype="hybrid", source="google", zoom = 4)
-
-      map = ggmap( baseMap ) + geom_point( aes( x = lon, y = lat,
-      color = factor( Market ) ),  data = dealers )
-
-    print( map )
-    })
-  
+   
   output$markets <- renderPlot({
 
-
+    # the geo centering didn't work for a few dealers on the east coast
     bad = c( 10467, 7437, 9894, 10728, 15948 )
     data = read.csv( 'market_segs.out' )
     names( data ) <- c( "dealerID", "lat", "lon", "Market" )
@@ -166,13 +148,13 @@ shinyServer(function(input, output) {
     maxs = apply( mPerformance[ 2:6 ], 2, max )
     mins = apply( mPerformance[ 2:6 ], 2, min )
 
-
+    # scale to [0, 1 ]
     norm = scale( mPerformance[ ,2:6 ], center = mins, scale = maxs - mins )
     norm = transform( norm, dealerID = mPerformance$dealerID )
     norm = transform( norm, Market = mPerformance$Market )
 
     marketNames = c( "Midwest", "West", "Southwest", "Northeast", "Southeast" )
-    colors = c( "red", "yellow", "green", "blue", "purple" )
+    colors = c( "red", "purple", "blue", "yellow", "green" )
 
     par( mfrow = c( 2, 3 ) )
     for (i in 1:5) {
@@ -183,9 +165,6 @@ shinyServer(function(input, output) {
                 radial.lim = c( 0, 1), poly.col = colors[ i ],
                   main = marketNames[ i ] )
     }
-
-
-                  
 
 
 
