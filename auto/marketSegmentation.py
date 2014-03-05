@@ -7,10 +7,14 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import silhouette_score
 
-# read in aggregate data on each dearlership from DB.  Then cluster the 96
-# dealership points in that N-dimensional space.
+
 
 class Model:
+    """
+    Group dealers geographically into markets.  Estimate dealer location by averaging
+    the lat/long coordinates from its customers' zip codes
+    """
+    
     def __init__( self, **kwargs ):
         self.readData( **kwargs )
 
