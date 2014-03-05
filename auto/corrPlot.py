@@ -75,4 +75,19 @@ xfit = np.linspace( 0., 1., num = 50 )
 yfit = slope * xfit + intercept
 axs[ 1, 2 ].plot( xfit, yfit, 'r' )
 
+
+# checking correlation between growth and sales
+growth = X[ :, 4 ]
+sales = X[ :, 0 ]
+
+slope, intercept, r_value, p_value, std_err = linregress( growth, sales )
+print 'PEARSON R, R**2 VALUE'
+print r_value, r_value**2
+
+xfit = np.linspace( 0., 1., num = 50 )
+yfit = slope * xfit + intercept
+axs[ 0, 4 ].plot( xfit, yfit, 'r' )
+
+
+
 plt.savefig( 'everything.png' )
