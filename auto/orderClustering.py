@@ -18,7 +18,7 @@ class Model:
     """
     def __init__( self, **kwargs ):
         pathToDB = kwargs[ 'pathToDB' ]
-        
+
         self.readROs( pathToDB )
         self.cluster( 2 )
         self.calcOrderTypes( pathToDB )
@@ -93,23 +93,21 @@ class Model:
         res = cursor.fetchall()
         makeDict = { "NISSAN": 0, "INFINITI": 1 }
 
-        for item in res:
-            dealer = item[ 0 ]
-            make = item[ 1 ]
-            if dealer in df.index:
-                if make in makeDict:
-                    df.loc[ dealer, "primaryMake" ] = makeDict[ make ]
-                else:
-                    df.loc[ dealer, "primaryMake" ] = 2
+        makes = []
+        for line in res:
+            dealer = line[ 0 ]
+            make = line[ 0 ]
+            if make in makeDict:
+                make = makeDict[ make ]
+            else:
+                make = 2
+            makes.append( [ dealer, make ] )
 
-        makes = df.loc[ :, "primaryMake" ].values
-        dealers = df.index
-        ins = zip( dealers, makes )
-        np.savetxt( 'makes.out', ins, fmt = '%i,%i' )
+        np.savetxt( 'makes.out', makes, fmt = '%i,%i' )
             
 
     def findBestClustering( self, maxClusters = 10 ):
-        # no longer needed
+        # routine no longer needed
         
         cost = []
         score = []
@@ -141,6 +139,7 @@ class Model:
         print 'CLUSTER CENTERS AT '
         print kmeans.cluster_centers_
 
+        # check how good a job this clustering did
         score = silhouette_score( X, labels, metric = 'euclidean', sample_size = 10000 )
         print 'AVERAGE SILHOUETTE SCORE ', score
 
