@@ -20,6 +20,7 @@ shinyServer(function(input, output) {
 
   # standard scaling
   #p = scale( performance[ ,2:6 ], center = TRUE, scale = TRUE )
+
   
   # reactive expression to calculate weights interactively
   weights = reactive({
@@ -143,16 +144,25 @@ shinyServer(function(input, output) {
 
     inds = by( allData, allData$Market, function(X) X[ which.max(X$Rating),])
     bestDealers = do.call( "rbind", inds )
-
+    
     mPerformance = join( performance, dealers, by = 'dealerID', type = 'inner' )
-    maxs = apply( mPerformance[ 2:6 ], 2, max )
-    mins = apply( mPerformance[ 2:6 ], 2, min )
+    maxs = apply( mPerformance[ ,2:6 ], 2, max )
+    mins = apply( mPerformance[ ,2:6 ], 2, min )
 
     # scale to [0, 1 ]
-    norm = scale( mPerformance[ ,2:6 ], center = mins, scale = maxs - mins )
-    norm = transform( norm, dealerID = mPerformance$dealerID )
-    norm = transform( norm, Market = mPerformance$Market )
+    norm = scale( mPerformance[ ,2:6 ], center = mins, scale = maxs - mins)
+    norm = as.data.frame( norm )
+    names( norm ) = names( mPerformance )[ 2:6 ]
 
+    
+    norm$dealerID = mPerformance$dealerID
+    norm$Market = mPerformance$Market
+
+    
+    #norm = transform( norm, "dealerID" = mPerformance$dealerID )
+    #norm = transform( norm, "Market" = mPerformance$Market )
+
+    
     marketNames = c( "Midwest", "West", "Southwest", "Northeast", "Southeast" )
     colors = c( "red", "purple", "blue", "yellow", "green" )
 
