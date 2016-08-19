@@ -1,6 +1,7 @@
 
 # common-libs
 from lw import get_logger, get_header, get_root_logger
+from util import get_path
 
 # third party modules
 from bs4 import BeautifulSoup
@@ -69,9 +70,10 @@ class InsultExtractor(object):
 
 if __name__ == '__main__':
 
+    loc = get_path(__file__) + '/{0}'
     root_logger = get_root_logger()
     get_header(root_logger, "Extracting all of Trump's insults.  This may take a while...")
 
     insults = InsultExtractor()
     insults.extract()
-    insults.export_to_csv('../data/insults.csv')
+    insults.export_to_csv(loc.format('../data/insults.csv'))

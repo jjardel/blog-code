@@ -1,1 +1,3 @@
 !.gitignore
+twitter_creds.json
+*.csv
