@@ -63,7 +63,7 @@ class InsultExtractor(object):
         df.drop('links', axis=1, inplace=True)
 
         # write to csv
-        df.to_csv(path)
+        df.to_csv(path + 'insults.csv')
 
         self.logger.info('Wrote results to {0}'.format(path))
 

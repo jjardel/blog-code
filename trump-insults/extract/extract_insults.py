@@ -18,7 +18,7 @@ if __name__ == '__main__':
     get_header(root_logger, "Extracting all of Trump's insults.  This may take a while...")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path', required=True, help='where would you like to extract to?')
+    parser.add_argument('--path', required=True, help='where would you like to extract_insult_tweets to?')
 
     args = parser.parse_args()
 

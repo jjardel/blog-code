@@ -28,7 +28,7 @@ class TweetExtractor(object):
 
         self.api = tweepy.API(auth)
 
-    def extract(self):
+    def extract_insult_tweets(self):
 
         try:
             insults_df = read_csv(self.loc.format('data/insults.csv'))
@@ -59,16 +59,41 @@ class TweetExtractor(object):
 
             cursor += chunksize
 
-        self.tweets_df = tweets_df
+        self.insult_tweets_df = tweets_df
 
-    def export_to_csv(self, path):
+    def extract_all_tweets(self, batch_size=200, num_tweets=4000):
 
-        self.logger.info('Writing results to {0}'.format(path))
-        self.tweets_df.to_csv(path)
+        user = 'realdonaldtrump'
+        res = []
+
+        self.logger.info('Collecting the last {0} Trump tweets'.format(num_tweets))
+        cursor = 0
+        page = 1
+        while cursor <= num_tweets:
+            res += self.api.user_timeline(user, count=batch_size, page=page)
+            page += 1
+            cursor += batch_size
+
+        # pick off the schema from the first tweet
+        df = json_normalize(res[0]._json)
+        df.drop(0, inplace=True)
+
+        for tweet in res:
+            df = df.append(json_normalize(tweet._json))
+
+        self.all_tweets_df = df
+
+    def export_to_csv(self, path_base):
+
+        self.logger.info('Writing insult tweets to {0}'.format(path_base) + 'insult_tweets.csv')
+        self.insult_tweets_df.to_csv(path_base + 'insult_tweets.csv')
+
+        self.logger.info('Writing all tweets to {0}'.format(path_base) + 'all_tweets.csv')
+        self.all_tweets_df.to_csv(path_base + 'all_tweets.csv')
 
 
 if __name__ == '__main__':
 
     # for testing
     twex = TweetExtractor()
-    twex.extract()
+    twex.extract_insult_tweets()
