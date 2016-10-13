@@ -1,0 +1,3 @@
+!.gitignore
+initialize_environment_vars.sh
+credentials.json
