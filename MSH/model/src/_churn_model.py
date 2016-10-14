@@ -1,19 +1,31 @@
 
 # python standard packages
 from collections import defaultdict
+from pandas import DataFrame
+import pickle
+import numpy as np
+import json
+from copy import deepcopy
+
 
 # my common_libs code
 from common_libs.lw import get_header, get_root_logger, get_logger
 from common_libs.db_conn import DBConn
 from common_libs.util import get_path
 
+from ._util import CustomJSONEncoder
+
 # 3rd party packages
 from lazy_property import LazyProperty
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, Imputer
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
 
-import numpy as np
+RANDOM_STATE = 42  # the answer is 42
+
 
 class ChurnModel(object):
     """
@@ -23,7 +35,7 @@ class ChurnModel(object):
     def __init__(self):
 
         self.logger = get_logger(__name__)
-        self.loc = get_path(__file__) + '/{0}'
+        self.loc = get_path(__file__) + '/../{0}'
 
         self.table = 'clean.customer_attributes'  # bring this into constructor args if needed
 
@@ -38,15 +50,15 @@ class ChurnModel(object):
         self.logger.info('Retreiving data from {table}'.format(table=self.table))
         schema, table = self.table.split('.')
 
-        conn = DBConn(self.loc.format('../../credentials.json'))
-        data = conn.export(table, schema=schema, index_col='customer_id')
+        self.conn = DBConn(self.loc.format('../credentials.json'))
+        data = self.conn.export(table, schema=schema, index_col='customer_id')
 
         return data
 
     def _custom_preprocessing(self):
         """
-        Rransformations that happen outside of sklearn's Pipeline go here
-        e.g. label encoding, one-hot encoding
+        Transformations that happen outside of sklearn's Pipeline go here
+        (e.g. label encoding, one-hot encoding).  Output is tranformed feature/label vectors
 
         :return: X (n x m) matrix of features
         :rtype: ndarray
@@ -54,7 +66,7 @@ class ChurnModel(object):
         :rtype ndarray
         """
 
-        raw_data = self.data
+        raw_data = deepcopy(self.data)
 
         # map categorical variables (and labels) to integers, and save the mappings
         self.label_encodings = defaultdict(LabelEncoder)
@@ -73,27 +85,134 @@ class ChurnModel(object):
         X_num = raw_data[self.numerical_vars].values
         X = np.hstack((X_cat, X_num))
 
-        y = raw_data[self.label_var].values
+        y = raw_data[self.label_var].values.astype(int)
 
         return X, y
+
+    def _save_model(self):
+
+        with open(self.loc.format('output/model.pkl'), 'wb') as fp:
+            pickle.dump(self.model, fp)
+
+    def _evaluate(self, x_train, x_test, y_train, y_test):
+
+        self.logger.info('Evalulating model fit from held out data')
+
+        preds = self.model.predict(x_test)
+        pred_scores = self.model.predict_proba(x_test)
+
+        self.logger.info(classification_report(y_test,
+                                               preds,
+                                               target_names=self.label_encodings['status'].classes_
+        ))
+
+        names = self.label_encodings['status'].classes_
+        pos_idx = np.where(names == 'canceled')[0][0]
+
+
+        fpr, tpr, _ = roc_curve(y_test, pred_scores[:, pos_idx], pos_label=pos_idx)
+        auc = roc_auc_score(y_test, pred_scores[:, pos_idx])
+        self.logger.info('ROC AUC= %0.2f' % auc)
+
+        # plot ROC curve
+        plt.clf()
+        plt.plot(fpr, tpr, 'r', label='ROC curve (area= %0.2f)' % auc)
+        plt.plot([0, 1], [0, 1], 'k--')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.legend(loc='lower right')
+        plt.savefig(self.loc.format('output/roc_curve.png'))
 
     def train(self):
 
         X, y = self._custom_preprocessing()
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE)
 
+        p = Pipeline([
+            ('impute_missing_vals', Imputer(strategy='median')),
+            ('random_forest', RandomForestClassifier(random_state=RANDOM_STATE))
 
+        ])
 
-        print("breakpoint")
+        # set hyperparameter ranges for CV
+        n_trees = np.logspace(1.5, 3, dtype=int, num=7)
+        max_features = ['auto', 'log2', None]
+        max_depth = list(np.logspace(0.7, 1.5, dtype=int, num=4)) + [None]
+        min_samples_split = [1, 5, 10, 20, 50]
+        min_samples_leaf = [1, 5, 10, 20]
 
+        params = {
+            'random_forest__n_estimators': n_trees,
+            'random_forest__max_features': max_features,
+            'random_forest__max_depth': max_depth,
+            'random_forest__min_samples_split': min_samples_split,
+            'random_forest__min_samples_leaf': min_samples_leaf
 
+        }
 
+        k_folds = 3
 
+        # initialize grid search for model hyperparameters using a grid search
+        self.logger.info('Tuning model hyperparameters with Cross Validation')
+        n_combs = k_folds
+        for k, v in params.items():
+            n_combs *= len(v)
 
+        self.logger.info('{0} combinations to be tried'.format(n_combs))
 
+        gs = GridSearchCV(p, params, cv=k_folds, scoring='roc_auc', n_jobs=-1, verbose=1)
+        gs.fit(X_train, y_train)
 
+        self.model = gs.best_estimator_
+        self.logger.info('Best model parameters: {0}'.format(gs.best_params_))
 
+        # load CV results into DB for analysis/logging
+        cv_df = DataFrame(gs.cv_results_)
+
+        # some type conversions... sklearn uses some types that are not JSON serializable
+        cv_df = cv_df.apply(lambda x: x.astype(object))
+        cv_df.params = cv_df.params.apply(lambda x: json.dumps(x, cls=CustomJSONEncoder))
+
+        self.logger.info("Loading CV results into model.cv_results table")
+        self.conn.load(cv_df, 'cv_results', schema='model', if_exists='replace')
+
+        self._evaluate(X_train, X_test, y_train, y_test)
+
+        self._save_model()
+
+    def predict(self):
+
+        if not self.model:
+            raise AttributeError("no trained model found.  Either run the train method, or pass a pre-trained modedl")
+
+        # apply all the same transformations to the full data set
+        x, y = self._custom_preprocessing()
+
+        preds = self.model.predict(x)
+        pred_probs = self.model.predict_proba(x)
+
+        # load predicted labels + class probabilities into DB
+        self.data.loc[:, 'predicted_status'] = self.label_encodings['status'].inverse_transform(preds)
+
+        cancel_idx = np.where(self.label_encodings['status'].classes_ == 'canceled')[0][0]
+        active_idx = np.where(self.label_encodings['status'].classes_ == 'active')[0][0]
+
+        self.data.loc[:, 'prob_cancel'] = pred_probs[:, cancel_idx]
+        self.data.loc[:, 'prob_active'] = pred_probs[:, active_idx]
+
+        self.logger.info('Loading prediction scores and probabilities into model.results')
+        self.conn.load(self.data, 'results', 'model', if_exists='replace', index=True)
+
+    def load_saved_model(self, model_path):
+        """
+        Rather than re-train, load a pickled model that was previously trained
+
+        :param model_path:  path to model file
+        :type: str
+        """
+
+        raise NotImplementedError('No time for this yet')
 
 
 
