@@ -32,12 +32,12 @@ class ChurnModel(object):
     docs go here
     """
 
-    def __init__(self):
+    def __init__(self, date_table):
 
         self.logger = get_logger(__name__)
         self.loc = get_path(__file__) + '/../{0}'
 
-        self.table = 'clean.customer_attributes'  # bring this into constructor args if needed
+        self.table = date_table
 
         # metadata about features/labels
         self.categorical_vars = ['x2', 'x3', 'x4', 'x5']
@@ -109,7 +109,6 @@ class ChurnModel(object):
         names = self.label_encodings['status'].classes_
         pos_idx = np.where(names == 'canceled')[0][0]
 
-
         fpr, tpr, _ = roc_curve(y_test, pred_scores[:, pos_idx], pos_label=pos_idx)
         auc = roc_auc_score(y_test, pred_scores[:, pos_idx])
         self.logger.info('ROC AUC= %0.2f' % auc)
@@ -136,7 +135,7 @@ class ChurnModel(object):
         ])
 
         # set hyperparameter ranges for CV
-        n_trees = np.logspace(1.5, 3, dtype=int, num=7)
+        n_trees = np.logspace(2, 3.3, dtype=int, num=5)
         max_features = ['auto', 'log2', None]
         max_depth = list(np.logspace(0.7, 1.5, dtype=int, num=4)) + [None]
         min_samples_split = [1, 5, 10, 20, 50]
@@ -212,16 +211,16 @@ class ChurnModel(object):
         :type: str
         """
 
-        raise NotImplementedError('No time for this yet')
+        with open(self.loc.format(model_path), 'rb') as fp:
+            self.model = pickle.load(fp)
 
-
-
+        self.logger.info('Loaded pre-trained model at {0}'.format(model_path))
 
 
 if __name__ == '__main__':
 
     logger = get_root_logger()
-    _ = get_header(logger, 'Building a model to predict customer retention')
+    _ = get_header(logger, 'Testing.....')
     model = ChurnModel()
 
     model.train()
