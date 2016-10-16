@@ -41,7 +41,7 @@ class ChurnModel(object):
 
         # metadata about features/labels
         self.categorical_vars = ['x2', 'x3', 'x4', 'x5']
-        self.numerical_vars = ['days_since_signup', 'x1', 'x6', 'x7', 'x8']
+        self.numerical_vars = ['x1', 'x6', 'x7', 'x8']  # excluding lifetime
         self.label_var = 'status'
 
     @LazyProperty
@@ -138,7 +138,7 @@ class ChurnModel(object):
         n_trees = np.logspace(2, 3.3, dtype=int, num=5)
         max_features = ['auto', 'log2', None]
         max_depth = list(np.logspace(0.7, 1.5, dtype=int, num=4)) + [None]
-        min_samples_split = [1, 5, 10, 20, 50]
+        min_samples_split = [1, 5, 10, 20]
         min_samples_leaf = [1, 5, 10, 20]
 
         params = {
