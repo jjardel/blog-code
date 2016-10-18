@@ -29,15 +29,21 @@ RANDOM_STATE = 42  # the answer is 42
 
 class ChurnModel(object):
     """
-    docs go here
+    Model customer status based on a table of masked attributes.
+    Find which features are important in the classification.
     """
 
-    def __init__(self, date_table):
+    def __init__(self, data_table):
+        """
+
+        :param data_table:  Name of database table where data is stored
+        :type data_table: str
+        """
 
         self.logger = get_logger(__name__)
         self.loc = get_path(__file__) + '/../{0}'
 
-        self.table = date_table
+        self.table = data_table
 
         # metadata about features/labels
         self.categorical_vars = ['x2', 'x3', 'x4', 'x5']
