@@ -1,7 +1,7 @@
 
 # python standard packages
 from collections import defaultdict
-from pandas import DataFrame
+from pandas import DataFrame, get_dummies
 import pickle
 import numpy as np
 import json
@@ -41,8 +41,9 @@ class ChurnModel(object):
 
         # metadata about features/labels
         self.categorical_vars = ['x2', 'x3', 'x4', 'x5']
-        self.numerical_vars = ['x1', 'x6', 'x7', 'x8']  # excluding lifetime
+        self.numerical_vars = ['x1', 'x6', 'x7', 'x8']
         self.label_var = 'status'
+        self.cols_to_drop = ['signup_date', 'cancel_date', 'days_since_signup']
 
     @LazyProperty
     def data(self):
@@ -68,24 +69,24 @@ class ChurnModel(object):
 
         raw_data = deepcopy(self.data)
 
-        # map categorical variables (and labels) to integers, and save the mappings
-        self.label_encodings = defaultdict(LabelEncoder)
+        # binarize labels
+        y = raw_data['status'].apply(lambda x: 1 if x == 'canceled' else 0).values
+        raw_data.drop('status', axis=1, inplace=True)
 
-        # apply a LabelEncoder to all categorical vars + the category labels
-        labels_df = raw_data[self.categorical_vars + [self.label_var]].\
-            apply(lambda x: self.label_encodings[x.name].fit_transform(x))
+        # 1-hot encoding
+        self.data_processed = get_dummies(raw_data)
+        self.label_encodings = {
+            1: 'canceled',
+            0: 'active'
+        }
+        self.label_encodings_inv = {
+            'canceled': 1,
+            'active': 0
+        }
 
-        raw_data.update(labels_df)
-
-        # apply a one-hot encoding transformation to the categorical features
-        self.one_hot_encoding = OneHotEncoder()
-        X_cat = self.one_hot_encoding.fit_transform(raw_data[self.categorical_vars]).toarray()
-
-        # stack categorical + numerical features
-        X_num = raw_data[self.numerical_vars].values
-        X = np.hstack((X_cat, X_num))
-
-        y = raw_data[self.label_var].values.astype(int)
+        # drop unwanted columns
+        self.data_processed.drop(self.cols_to_drop, axis=1, inplace=True)
+        X = self.data_processed.values
 
         return X, y
 
@@ -103,14 +104,15 @@ class ChurnModel(object):
 
         self.logger.info(classification_report(y_test,
                                                preds,
-                                               target_names=self.label_encodings['status'].classes_
+                                               target_names=['active', 'canceled']
         ))
 
-        names = self.label_encodings['status'].classes_
-        pos_idx = np.where(names == 'canceled')[0][0]
+        fpr, tpr, _ = roc_curve(y_test,
+                                pred_scores[:, self.label_encodings_inv['canceled']],
+                                pos_label=self.label_encodings_inv['canceled']
+        )
 
-        fpr, tpr, _ = roc_curve(y_test, pred_scores[:, pos_idx], pos_label=pos_idx)
-        auc = roc_auc_score(y_test, pred_scores[:, pos_idx])
+        auc = roc_auc_score(y_test, pred_scores[:, self.label_encodings_inv['canceled']])
         self.logger.info('ROC AUC= %0.2f' % auc)
 
         # plot ROC curve
@@ -192,16 +194,15 @@ class ChurnModel(object):
         pred_probs = self.model.predict_proba(x)
 
         # load predicted labels + class probabilities into DB
-        self.data.loc[:, 'predicted_status'] = self.label_encodings['status'].inverse_transform(preds)
+        self.data.loc[:, 'predicted_status'] = [self.label_encodings[x] for x in preds]
 
-        cancel_idx = np.where(self.label_encodings['status'].classes_ == 'canceled')[0][0]
-        active_idx = np.where(self.label_encodings['status'].classes_ == 'active')[0][0]
-
-        self.data.loc[:, 'prob_cancel'] = pred_probs[:, cancel_idx]
-        self.data.loc[:, 'prob_active'] = pred_probs[:, active_idx]
+        self.data.loc[:, 'prob_cancel'] = pred_probs[:, self.label_encodings_inv['canceled']]
+        self.data.loc[:, 'prob_active'] = pred_probs[:, self.label_encodings_inv['active']]
 
         self.logger.info('Loading prediction scores and probabilities into model.results')
         self.conn.load(self.data, 'results', 'model', if_exists='replace', index=True)
+
+        print("breakpoint")
 
     def load_saved_model(self, model_path):
         """
